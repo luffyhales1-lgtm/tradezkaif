@@ -38,7 +38,13 @@ function LogPage() {
   const [active, setActive] = useState<LogKind[]>(KINDS);
   const now = useNow(1000);
 
-  useEffect(() => subscribeLogs(setEvents), []);
+  useEffect(() => {
+    const unsub = subscribeLogs(setEvents);
+    return () => {
+      unsub();
+    };
+  }, []);
+
 
   const shown = events.filter((e) => active.includes(e.kind));
 
