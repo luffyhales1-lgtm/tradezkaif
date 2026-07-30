@@ -10,33 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OrderflowRouteImport } from './routes/orderflow'
+import { Route as SpoofingRouteImport } from './routes/spoofing'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OrderflowRoute = OrderflowRouteImport.update({
+  id: '/orderflow',
+  path: '/orderflow',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SpoofingRoute = SpoofingRouteImport.update({
+  id: '/spoofing',
+  path: '/spoofing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/orderflow': typeof OrderflowRoute
+  '/spoofing': typeof SpoofingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/orderflow': typeof OrderflowRoute
+  '/spoofing': typeof SpoofingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/orderflow': typeof OrderflowRoute
+  '/spoofing': typeof SpoofingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/orderflow' | '/spoofing'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/orderflow' | '/spoofing'
+  id: '__root__' | '/' | '/orderflow' | '/spoofing'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  OrderflowRoute: typeof OrderflowRoute
+  SpoofingRoute: typeof SpoofingRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +68,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/orderflow': {
+      id: '/orderflow'
+      path: '/orderflow'
+      fullPath: '/orderflow'
+      preLoaderRoute: typeof OrderflowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/spoofing': {
+      id: '/spoofing'
+      path: '/spoofing'
+      fullPath: '/spoofing'
+      preLoaderRoute: typeof SpoofingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  OrderflowRoute: OrderflowRoute,
+  SpoofingRoute: SpoofingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
