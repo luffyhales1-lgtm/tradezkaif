@@ -10,12 +10,30 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FibRouteImport } from './routes/fib'
+import { Route as FootprintRouteImport } from './routes/footprint'
+import { Route as LiquidityRouteImport } from './routes/liquidity'
 import { Route as OrderflowRouteImport } from './routes/orderflow'
 import { Route as SpoofingRouteImport } from './routes/spoofing'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FibRoute = FibRouteImport.update({
+  id: '/fib',
+  path: '/fib',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FootprintRoute = FootprintRouteImport.update({
+  id: '/footprint',
+  path: '/footprint',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LiquidityRoute = LiquidityRouteImport.update({
+  id: '/liquidity',
+  path: '/liquidity',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrderflowRoute = OrderflowRouteImport.update({
@@ -31,30 +49,50 @@ const SpoofingRoute = SpoofingRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/fib': typeof FibRoute
+  '/footprint': typeof FootprintRoute
+  '/liquidity': typeof LiquidityRoute
   '/orderflow': typeof OrderflowRoute
   '/spoofing': typeof SpoofingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/fib': typeof FibRoute
+  '/footprint': typeof FootprintRoute
+  '/liquidity': typeof LiquidityRoute
   '/orderflow': typeof OrderflowRoute
   '/spoofing': typeof SpoofingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/fib': typeof FibRoute
+  '/footprint': typeof FootprintRoute
+  '/liquidity': typeof LiquidityRoute
   '/orderflow': typeof OrderflowRoute
   '/spoofing': typeof SpoofingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/orderflow' | '/spoofing'
+  fullPaths:
+    '/' | '/fib' | '/footprint' | '/liquidity' | '/orderflow' | '/spoofing'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/orderflow' | '/spoofing'
-  id: '__root__' | '/' | '/orderflow' | '/spoofing'
+  to: '/' | '/fib' | '/footprint' | '/liquidity' | '/orderflow' | '/spoofing'
+  id:
+    | '__root__'
+    | '/'
+    | '/fib'
+    | '/footprint'
+    | '/liquidity'
+    | '/orderflow'
+    | '/spoofing'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  FibRoute: typeof FibRoute
+  FootprintRoute: typeof FootprintRoute
+  LiquidityRoute: typeof LiquidityRoute
   OrderflowRoute: typeof OrderflowRoute
   SpoofingRoute: typeof SpoofingRoute
 }
@@ -66,6 +104,27 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fib': {
+      id: '/fib'
+      path: '/fib'
+      fullPath: '/fib'
+      preLoaderRoute: typeof FibRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/footprint': {
+      id: '/footprint'
+      path: '/footprint'
+      fullPath: '/footprint'
+      preLoaderRoute: typeof FootprintRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/liquidity': {
+      id: '/liquidity'
+      path: '/liquidity'
+      fullPath: '/liquidity'
+      preLoaderRoute: typeof LiquidityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orderflow': {
@@ -87,6 +146,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  FibRoute: FibRoute,
+  FootprintRoute: FootprintRoute,
+  LiquidityRoute: LiquidityRoute,
   OrderflowRoute: OrderflowRoute,
   SpoofingRoute: SpoofingRoute,
 }
