@@ -13,8 +13,12 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as FibRouteImport } from './routes/fib'
 import { Route as FootprintRouteImport } from './routes/footprint'
 import { Route as LiquidityRouteImport } from './routes/liquidity'
+import { Route as MathRouteImport } from './routes/math'
 import { Route as OrderflowRouteImport } from './routes/orderflow'
+import { Route as ScalpingRouteImport } from './routes/scalping'
 import { Route as SpoofingRouteImport } from './routes/spoofing'
+import { Route as SwingRouteImport } from './routes/swing'
+import { Route as UltimateRouteImport } from './routes/ultimate'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -36,14 +40,34 @@ const LiquidityRoute = LiquidityRouteImport.update({
   path: '/liquidity',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MathRoute = MathRouteImport.update({
+  id: '/math',
+  path: '/math',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrderflowRoute = OrderflowRouteImport.update({
   id: '/orderflow',
   path: '/orderflow',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ScalpingRoute = ScalpingRouteImport.update({
+  id: '/scalping',
+  path: '/scalping',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SpoofingRoute = SpoofingRouteImport.update({
   id: '/spoofing',
   path: '/spoofing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SwingRoute = SwingRouteImport.update({
+  id: '/swing',
+  path: '/swing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UltimateRoute = UltimateRouteImport.update({
+  id: '/ultimate',
+  path: '/ultimate',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -52,16 +76,24 @@ export interface FileRoutesByFullPath {
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
   '/liquidity': typeof LiquidityRoute
+  '/math': typeof MathRoute
   '/orderflow': typeof OrderflowRoute
+  '/scalping': typeof ScalpingRoute
   '/spoofing': typeof SpoofingRoute
+  '/swing': typeof SwingRoute
+  '/ultimate': typeof UltimateRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
   '/liquidity': typeof LiquidityRoute
+  '/math': typeof MathRoute
   '/orderflow': typeof OrderflowRoute
+  '/scalping': typeof ScalpingRoute
   '/spoofing': typeof SpoofingRoute
+  '/swing': typeof SwingRoute
+  '/ultimate': typeof UltimateRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -69,23 +101,50 @@ export interface FileRoutesById {
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
   '/liquidity': typeof LiquidityRoute
+  '/math': typeof MathRoute
   '/orderflow': typeof OrderflowRoute
+  '/scalping': typeof ScalpingRoute
   '/spoofing': typeof SpoofingRoute
+  '/swing': typeof SwingRoute
+  '/ultimate': typeof UltimateRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/fib' | '/footprint' | '/liquidity' | '/orderflow' | '/spoofing'
+    | '/'
+    | '/fib'
+    | '/footprint'
+    | '/liquidity'
+    | '/math'
+    | '/orderflow'
+    | '/scalping'
+    | '/spoofing'
+    | '/swing'
+    | '/ultimate'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/fib' | '/footprint' | '/liquidity' | '/orderflow' | '/spoofing'
+  to:
+    | '/'
+    | '/fib'
+    | '/footprint'
+    | '/liquidity'
+    | '/math'
+    | '/orderflow'
+    | '/scalping'
+    | '/spoofing'
+    | '/swing'
+    | '/ultimate'
   id:
     | '__root__'
     | '/'
     | '/fib'
     | '/footprint'
     | '/liquidity'
+    | '/math'
     | '/orderflow'
+    | '/scalping'
     | '/spoofing'
+    | '/swing'
+    | '/ultimate'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -93,8 +152,12 @@ export interface RootRouteChildren {
   FibRoute: typeof FibRoute
   FootprintRoute: typeof FootprintRoute
   LiquidityRoute: typeof LiquidityRoute
+  MathRoute: typeof MathRoute
   OrderflowRoute: typeof OrderflowRoute
+  ScalpingRoute: typeof ScalpingRoute
   SpoofingRoute: typeof SpoofingRoute
+  SwingRoute: typeof SwingRoute
+  UltimateRoute: typeof UltimateRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -127,6 +190,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LiquidityRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/math': {
+      id: '/math'
+      path: '/math'
+      fullPath: '/math'
+      preLoaderRoute: typeof MathRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/orderflow': {
       id: '/orderflow'
       path: '/orderflow'
@@ -134,11 +204,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrderflowRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/scalping': {
+      id: '/scalping'
+      path: '/scalping'
+      fullPath: '/scalping'
+      preLoaderRoute: typeof ScalpingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/spoofing': {
       id: '/spoofing'
       path: '/spoofing'
       fullPath: '/spoofing'
       preLoaderRoute: typeof SpoofingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/swing': {
+      id: '/swing'
+      path: '/swing'
+      fullPath: '/swing'
+      preLoaderRoute: typeof SwingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ultimate': {
+      id: '/ultimate'
+      path: '/ultimate'
+      fullPath: '/ultimate'
+      preLoaderRoute: typeof UltimateRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -149,8 +240,12 @@ const rootRouteChildren: RootRouteChildren = {
   FibRoute: FibRoute,
   FootprintRoute: FootprintRoute,
   LiquidityRoute: LiquidityRoute,
+  MathRoute: MathRoute,
   OrderflowRoute: OrderflowRoute,
+  ScalpingRoute: ScalpingRoute,
   SpoofingRoute: SpoofingRoute,
+  SwingRoute: SwingRoute,
+  UltimateRoute: UltimateRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
