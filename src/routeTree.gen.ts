@@ -10,33 +10,232 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as FibRouteImport } from './routes/fib'
+import { Route as FootprintRouteImport } from './routes/footprint'
+import { Route as LiquidityRouteImport } from './routes/liquidity'
+import { Route as LogRouteImport } from './routes/log'
+import { Route as MathRouteImport } from './routes/math'
+import { Route as NewsRouteImport } from './routes/news'
+import { Route as OrderflowRouteImport } from './routes/orderflow'
+import { Route as ScalpingRouteImport } from './routes/scalping'
+import { Route as SpoofingRouteImport } from './routes/spoofing'
+import { Route as StructureRouteImport } from './routes/structure'
+import { Route as SummaryRouteImport } from './routes/summary'
+import { Route as SwingRouteImport } from './routes/swing'
+import { Route as UltimateRouteImport } from './routes/ultimate'
+import { Route as WhaleRouteImport } from './routes/whale'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FibRoute = FibRouteImport.update({
+  id: '/fib',
+  path: '/fib',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FootprintRoute = FootprintRouteImport.update({
+  id: '/footprint',
+  path: '/footprint',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LiquidityRoute = LiquidityRouteImport.update({
+  id: '/liquidity',
+  path: '/liquidity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LogRoute = LogRouteImport.update({
+  id: '/log',
+  path: '/log',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MathRoute = MathRouteImport.update({
+  id: '/math',
+  path: '/math',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewsRoute = NewsRouteImport.update({
+  id: '/news',
+  path: '/news',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrderflowRoute = OrderflowRouteImport.update({
+  id: '/orderflow',
+  path: '/orderflow',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScalpingRoute = ScalpingRouteImport.update({
+  id: '/scalping',
+  path: '/scalping',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SpoofingRoute = SpoofingRouteImport.update({
+  id: '/spoofing',
+  path: '/spoofing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StructureRoute = StructureRouteImport.update({
+  id: '/structure',
+  path: '/structure',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SummaryRoute = SummaryRouteImport.update({
+  id: '/summary',
+  path: '/summary',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SwingRoute = SwingRouteImport.update({
+  id: '/swing',
+  path: '/swing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UltimateRoute = UltimateRouteImport.update({
+  id: '/ultimate',
+  path: '/ultimate',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WhaleRoute = WhaleRouteImport.update({
+  id: '/whale',
+  path: '/whale',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/fib': typeof FibRoute
+  '/footprint': typeof FootprintRoute
+  '/liquidity': typeof LiquidityRoute
+  '/log': typeof LogRoute
+  '/math': typeof MathRoute
+  '/news': typeof NewsRoute
+  '/orderflow': typeof OrderflowRoute
+  '/scalping': typeof ScalpingRoute
+  '/spoofing': typeof SpoofingRoute
+  '/structure': typeof StructureRoute
+  '/summary': typeof SummaryRoute
+  '/swing': typeof SwingRoute
+  '/ultimate': typeof UltimateRoute
+  '/whale': typeof WhaleRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/fib': typeof FibRoute
+  '/footprint': typeof FootprintRoute
+  '/liquidity': typeof LiquidityRoute
+  '/log': typeof LogRoute
+  '/math': typeof MathRoute
+  '/news': typeof NewsRoute
+  '/orderflow': typeof OrderflowRoute
+  '/scalping': typeof ScalpingRoute
+  '/spoofing': typeof SpoofingRoute
+  '/structure': typeof StructureRoute
+  '/summary': typeof SummaryRoute
+  '/swing': typeof SwingRoute
+  '/ultimate': typeof UltimateRoute
+  '/whale': typeof WhaleRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/fib': typeof FibRoute
+  '/footprint': typeof FootprintRoute
+  '/liquidity': typeof LiquidityRoute
+  '/log': typeof LogRoute
+  '/math': typeof MathRoute
+  '/news': typeof NewsRoute
+  '/orderflow': typeof OrderflowRoute
+  '/scalping': typeof ScalpingRoute
+  '/spoofing': typeof SpoofingRoute
+  '/structure': typeof StructureRoute
+  '/summary': typeof SummaryRoute
+  '/swing': typeof SwingRoute
+  '/ultimate': typeof UltimateRoute
+  '/whale': typeof WhaleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/fib'
+    | '/footprint'
+    | '/liquidity'
+    | '/log'
+    | '/math'
+    | '/news'
+    | '/orderflow'
+    | '/scalping'
+    | '/spoofing'
+    | '/structure'
+    | '/summary'
+    | '/swing'
+    | '/ultimate'
+    | '/whale'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/admin'
+    | '/fib'
+    | '/footprint'
+    | '/liquidity'
+    | '/log'
+    | '/math'
+    | '/news'
+    | '/orderflow'
+    | '/scalping'
+    | '/spoofing'
+    | '/structure'
+    | '/summary'
+    | '/swing'
+    | '/ultimate'
+    | '/whale'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/fib'
+    | '/footprint'
+    | '/liquidity'
+    | '/log'
+    | '/math'
+    | '/news'
+    | '/orderflow'
+    | '/scalping'
+    | '/spoofing'
+    | '/structure'
+    | '/summary'
+    | '/swing'
+    | '/ultimate'
+    | '/whale'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  FibRoute: typeof FibRoute
+  FootprintRoute: typeof FootprintRoute
+  LiquidityRoute: typeof LiquidityRoute
+  LogRoute: typeof LogRoute
+  MathRoute: typeof MathRoute
+  NewsRoute: typeof NewsRoute
+  OrderflowRoute: typeof OrderflowRoute
+  ScalpingRoute: typeof ScalpingRoute
+  SpoofingRoute: typeof SpoofingRoute
+  StructureRoute: typeof StructureRoute
+  SummaryRoute: typeof SummaryRoute
+  SwingRoute: typeof SwingRoute
+  UltimateRoute: typeof UltimateRoute
+  WhaleRoute: typeof WhaleRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,22 +247,132 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fib': {
+      id: '/fib'
+      path: '/fib'
+      fullPath: '/fib'
+      preLoaderRoute: typeof FibRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/footprint': {
+      id: '/footprint'
+      path: '/footprint'
+      fullPath: '/footprint'
+      preLoaderRoute: typeof FootprintRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/liquidity': {
+      id: '/liquidity'
+      path: '/liquidity'
+      fullPath: '/liquidity'
+      preLoaderRoute: typeof LiquidityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/log': {
+      id: '/log'
+      path: '/log'
+      fullPath: '/log'
+      preLoaderRoute: typeof LogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/math': {
+      id: '/math'
+      path: '/math'
+      fullPath: '/math'
+      preLoaderRoute: typeof MathRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/news': {
+      id: '/news'
+      path: '/news'
+      fullPath: '/news'
+      preLoaderRoute: typeof NewsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orderflow': {
+      id: '/orderflow'
+      path: '/orderflow'
+      fullPath: '/orderflow'
+      preLoaderRoute: typeof OrderflowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/scalping': {
+      id: '/scalping'
+      path: '/scalping'
+      fullPath: '/scalping'
+      preLoaderRoute: typeof ScalpingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/spoofing': {
+      id: '/spoofing'
+      path: '/spoofing'
+      fullPath: '/spoofing'
+      preLoaderRoute: typeof SpoofingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/structure': {
+      id: '/structure'
+      path: '/structure'
+      fullPath: '/structure'
+      preLoaderRoute: typeof StructureRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/summary': {
+      id: '/summary'
+      path: '/summary'
+      fullPath: '/summary'
+      preLoaderRoute: typeof SummaryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/swing': {
+      id: '/swing'
+      path: '/swing'
+      fullPath: '/swing'
+      preLoaderRoute: typeof SwingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ultimate': {
+      id: '/ultimate'
+      path: '/ultimate'
+      fullPath: '/ultimate'
+      preLoaderRoute: typeof UltimateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/whale': {
+      id: '/whale'
+      path: '/whale'
+      fullPath: '/whale'
+      preLoaderRoute: typeof WhaleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  FibRoute: FibRoute,
+  FootprintRoute: FootprintRoute,
+  LiquidityRoute: LiquidityRoute,
+  LogRoute: LogRoute,
+  MathRoute: MathRoute,
+  NewsRoute: NewsRoute,
+  OrderflowRoute: OrderflowRoute,
+  ScalpingRoute: ScalpingRoute,
+  SpoofingRoute: SpoofingRoute,
+  StructureRoute: StructureRoute,
+  SummaryRoute: SummaryRoute,
+  SwingRoute: SwingRoute,
+  UltimateRoute: UltimateRoute,
+  WhaleRoute: WhaleRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

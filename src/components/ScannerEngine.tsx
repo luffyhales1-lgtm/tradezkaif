@@ -1,0 +1,309 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchKlines, fetchTopSymbols, fmtPrice, type Interval } from "@/lib/binance";
+import { analyze, type Signal } from "@/lib/analysis";
+import {
+  conformalBand,
+  forwardReturns,
+  fractionalKelly,
+  hawkesIntensity,
+  quantile,
+  bayes,
+} from "@/lib/quant";
+import { pushLog } from "@/lib/bus";
+import { Panel, Pill, Stat } from "@/components/ui-bits";
+import { INTERVALS } from "@/lib/binance";
+import { cn } from "@/lib/utils";
+
+export type ScannerConfig = {
+  key: string;
+  title: string;
+  blurb: string;
+  defaultInterval: Interval;
+  durationMs: number;
+  universe: number;
+  results: number;
+  minProbability: number;
+  horizon: string;
+  useQuant?: boolean;
+};
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>) {
+  const out: R[] = [];
+  let i = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      try {
+        out.push(await fn(items[idx]));
+      } catch {
+        /* skip symbol */
+      }
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+export type ScanResult = Signal & {
+  quant?: { hawkes: number; kelly: number; band: string; bayes: number };
+};
+
+export function ScannerEngine({ config }: { config: ScannerConfig }) {
+  const [interval, setIntervalTf] = useState<Interval>(config.defaultInterval);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [left, setLeft] = useState(config.durationMs / 1000);
+  const [results, setResults] = useState<ScanResult[]>([]);
+  const [scannedAt, setScannedAt] = useState<number | null>(null);
+  const [scannedCount, setScannedCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const abort = useRef(false);
+
+  useEffect(() => () => void (abort.current = true), []);
+
+  const run = useCallback(async () => {
+    if (running) return;
+    abort.current = false;
+    setRunning(true);
+    setError(null);
+    setResults([]);
+    setProgress(0);
+    const started = Date.now();
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - started;
+      setLeft(Math.max(0, Math.ceil((config.durationMs - elapsed) / 1000)));
+    }, 250);
+
+    try {
+      const tickers = await fetchTopSymbols(config.universe);
+      const symbols = tickers.map((t) => t.symbol);
+      let done = 0;
+      const scored = await mapLimit(symbols, 8, async (symbol) => {
+        const candles = await fetchKlines(symbol, interval, 300);
+        done++;
+        setProgress(Math.round((done / symbols.length) * 100));
+        const a = analyze(symbol, candles, interval);
+        const sig = a.signal;
+        let quant: ScanResult["quant"];
+        if (config.useQuant) {
+          const rets = candles.slice(-120).map((c, i, arr) => (i ? (c.c - arr[i - 1].c) / arr[i - 1].c : 0));
+          const events = candles.slice(-40).filter((c) => c.v > 0).map((c) => c.t);
+          const hawkes = hawkesIntensity(events, Date.now());
+          const fwd = forwardReturns(candles, 12);
+          const band = conformalBand(0, fwd, 0.1);
+          const post = bayes(
+            Math.min(0.95, sig.probability / 100),
+            0.5,
+            Math.max(0.05, 1 - sig.probability / 100),
+          );
+          quant = {
+            hawkes,
+            kelly: fractionalKelly(post, sig.rr),
+            band: `±${(band.q * 100).toFixed(2)}%`,
+            bayes: post,
+          };
+          const tail = Math.abs(quantile(rets, 0.05));
+          sig.probability = Math.round(
+            Math.min(99, sig.probability * 0.6 + post * 40 + (tail < 0.02 ? 6 : 0)),
+          );
+        }
+        return { ...sig, quant } as ScanResult;
+      });
+
+      setScannedCount(scored.length);
+      const elapsed = Date.now() - started;
+      if (elapsed < config.durationMs) {
+        await new Promise((r) => setTimeout(r, config.durationMs - elapsed));
+      }
+      if (abort.current) return;
+
+      const top = scored
+        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability)
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, config.results);
+
+      setResults(top);
+      setScannedAt(Date.now());
+      top.forEach((s) =>
+        pushLog({
+          kind: "signal",
+          symbol: s.symbol,
+          text: `${config.title}: ${s.bias.toUpperCase()} ${s.symbol} @ ${fmtPrice(s.entry)}`,
+          meta: `${s.probability}% confluence · SL ${fmtPrice(s.stop)} · TP1 ${fmtPrice(s.targets[0])}`,
+        }),
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      clearInterval(tick);
+      setRunning(false);
+      setLeft(config.durationMs / 1000);
+    }
+  }, [config, interval, running]);
+
+  return (
+    <div className="space-y-4">
+      <Panel
+        title={config.title}
+        subtitle={config.blurb}
+        right={
+          <button
+            onClick={run}
+            disabled={running}
+            className={cn(
+              "num rounded-lg px-4 py-2 text-sm font-semibold",
+              running
+                ? "border border-border text-muted-foreground"
+                : "bg-primary text-primary-foreground",
+            )}
+          >
+            {running ? `SCANNING ${left}s` : `Run ${config.durationMs / 1000}s deep scan`}
+          </button>
+        }
+      >
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Timeframe</span>
+          {INTERVALS.map((i) => (
+            <button
+              key={i}
+              onClick={() => setIntervalTf(i)}
+              className={cn(
+                "num rounded border border-border px-2 py-1 text-xs",
+                i === interval
+                  ? "border-primary/60 bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-secondary",
+              )}
+            >
+              {i}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Stat label="Universe" value={`${config.universe} coins`} hint="Binance high-volume USDⓈ-M" />
+          <Stat label="Analysed" value={scannedCount || "—"} hint="symbols this run" />
+          <Stat label="Progress" value={`${progress}%`} />
+          <Stat
+            label="Min confluence"
+            value={`${config.minProbability}%`}
+            hint={config.horizon}
+          />
+        </div>
+        {running && (
+          <div className="mt-3 h-1.5 overflow-hidden rounded bg-secondary">
+            <div
+              className="h-full bg-primary transition-[width] duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
+        {error && <p className="mt-3 text-xs text-bear">Scan error: {error}</p>}
+      </Panel>
+
+      {scannedAt && !results.length && (
+        <Panel>
+          <p className="text-sm text-muted-foreground">
+            No setup cleared the {config.minProbability}% confluence filter this run. That is a
+            valid result — no trade is better than a forced trade. Re-scan after the next candle
+            closes.
+          </p>
+        </Panel>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        {results.map((s) => (
+          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function SignalCard({ signal, horizon }: { signal: ScanResult; horizon: string }) {
+  const long = signal.bias === "long";
+  return (
+    <article className="panel p-4">
+      <header className="flex items-start justify-between">
+        <div>
+          <div className="num text-lg font-bold">{signal.symbol}</div>
+          <div className="flex gap-1.5 pt-1">
+            <Pill tone={long ? "bull" : "bear"}>{signal.bias}</Pill>
+            <Pill tone="primary">{signal.probability}% confluence</Pill>
+            <Pill>{signal.interval}</Pill>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase text-muted-foreground">Target window</div>
+          <div className="num text-sm">{horizon}</div>
+        </div>
+      </header>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
+        <Stat label="Entry" value={fmtPrice(signal.entry)} />
+        <Stat label="Stop" value={fmtPrice(signal.stop)} tone="bear" />
+        {signal.targets.map((t, i) => (
+          <Stat key={i} label={`TP${i + 1}`} value={fmtPrice(t)} tone="bull" />
+        ))}
+      </div>
+
+      {signal.quant && (
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <Stat label="Hawkes λ(t)" value={signal.quant.hawkes.toFixed(3)} />
+          <Stat label="Bayes P(H|E)" value={`${(signal.quant.bayes * 100).toFixed(1)}%`} />
+          <Stat label="Frac. Kelly f*" value={`${(signal.quant.kelly * 100).toFixed(2)}%`} />
+          <Stat label="Conformal band" value={signal.quant.band} />
+        </div>
+      )}
+
+      <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+        {signal.confluence.map((c) => (
+          <li key={c.label} className="flex items-center justify-between gap-2">
+            <span>
+              <span
+                className={cn(
+                  "mr-1.5 inline-block size-1.5 rounded-full",
+                  c.bias === "long" ? "bg-bull" : c.bias === "short" ? "bg-bear" : "bg-muted-foreground",
+                )}
+              />
+              {c.label}
+            </span>
+            <span className="num text-right">{c.detail}</span>
+          </li>
+        ))}
+      </ul>
+
+      <button
+        onClick={() => exportSignalCsv(signal)}
+        className="mt-3 w-full rounded-lg border border-border py-1.5 text-xs text-muted-foreground hover:bg-secondary"
+      >
+        Export CSV report
+      </button>
+    </article>
+  );
+}
+
+export function exportSignalCsv(signal: ScanResult) {
+  const rows = [
+    ["symbol", "bias", "interval", "entry", "stop", "tp1", "tp2", "tp3", "probability", "rr", "generated"],
+    [
+      signal.symbol,
+      signal.bias,
+      signal.interval,
+      signal.entry,
+      signal.stop,
+      ...signal.targets,
+      signal.probability,
+      signal.rr.toFixed(2),
+      new Date(signal.createdAt).toISOString(),
+    ],
+    [],
+    ["confluence", "bias", "weight", "detail"],
+    ...signal.confluence.map((c) => [c.label, c.bias, c.weight.toFixed(1), c.detail]),
+  ];
+  const csv = rows.map((r) => r.join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cotraders-${signal.symbol}-${signal.interval}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
