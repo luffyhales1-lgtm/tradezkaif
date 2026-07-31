@@ -23,7 +23,7 @@ export const NAV = [
 ] as const;
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { session, logout } = useAccess();
+  const { session, logout, canAccess } = useAccess();
   const path = useRouterState({ select: (s) => s.location.pathname });
 
   return (
@@ -67,7 +67,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav className="mx-auto flex max-w-[1600px] gap-1 overflow-x-auto px-3 pb-2 scroll-lock">
-          {NAV.map((n) => (
+          {NAV.filter((n) => canAccess(n.to)).map((n) => (
             <Link
               key={n.to}
               to={n.to}

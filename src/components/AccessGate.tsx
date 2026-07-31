@@ -13,7 +13,6 @@ export function AccessGate({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
 
   if (!ready) {
     return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading…</div>;
