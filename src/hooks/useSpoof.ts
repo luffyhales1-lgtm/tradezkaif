@@ -105,7 +105,7 @@ export function useSpoofRadar(
             meta: `${t.confidence}/100 confidence · $${(t.peakUsd / 1e6).toFixed(2)}M cancelled after ${(age / 1000).toFixed(0)}s`,
           });
         }
-        tracks.current.delete(id);
+          tracks.current.delete(id);
         return;
       }
       if (t.status === "tracking" && age >= CONFIRM_MS && seen.has(id)) {

@@ -27,7 +27,7 @@ function Liquidity() {
   const { candles } = useCandles(symbol, interval, 400);
   const book = useBook(symbol);
   const price = useMarkPrice(symbol);
-  const [minWall, setMinWall] = useLocalState("cotraders.liq.wall", 500_000);
+  const [minWall, setMinWall] = useLocalState("cotraders.liq.wall", 10_000);
 
   const zones = useMemo(() => (candles.length > 60 ? liquidityZones(candles) : []), [candles]);
   const ba = useMemo(() => bookAnalysis(book, minWall), [book, minWall]);
@@ -39,7 +39,7 @@ function Liquidity() {
         <SymbolPicker symbol={symbol} setSymbol={setSymbol} interval={interval} setInterval={setInterval} />
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Whale size</span>
-          {[500_000, 1_000_000, 2_500_000, 5_000_000].map((v) => (
+          {[10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000].map((v) => (
             <button
               key={v}
               onClick={() => setMinWall(v)}

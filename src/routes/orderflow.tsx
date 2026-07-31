@@ -25,7 +25,7 @@ export const Route = createFileRoute("/orderflow")({
 
 function OrderFlow() {
   const { symbol, setSymbol } = useSymbolState();
-  const [minUsd, setMinUsd] = useLocalState("cotraders.flow.min", 100_000);
+  const [minUsd, setMinUsd] = useLocalState("cotraders.flow.min", 10_000);
   const { trades, stats } = useTrades(symbol, minUsd, 200);
   const book = useBook(symbol);
   const price = useMarkPrice(symbol);
@@ -56,7 +56,7 @@ function OrderFlow() {
         <SymbolPicker symbol={symbol} setSymbol={setSymbol} showInterval={false} />
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Min size</span>
-          {[100_000, 250_000, 500_000, 1_000_000].map((v) => (
+          {[10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000].map((v) => (
             <button
               key={v}
               onClick={() => setMinUsd(v)}
@@ -130,14 +130,13 @@ function OrderFlow() {
           </div>
         </Panel>
 
-        <Panel title="Resting limit walls" subtitle="≥ $500K sitting in the book">
+        <Panel title="Golden whale wall zone" subtitle="Confirmed live limits ≥ $500K, highlighted until traded">
           <div className="max-h-[560px] space-y-1.5 overflow-auto scroll-lock">
             {ba?.walls.map((w) => (
               <div
                 key={`${w.side}-${w.price}`}
                 className={cn(
-                  "flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs",
-                  w.side === "bid" ? "border-bull/35 bg-bull/5" : "border-bear/35 bg-bear/5",
+                  "flex items-center justify-between rounded-lg border border-warn/60 bg-warn/10 px-2.5 py-1.5 text-xs",
                 )}
               >
                 <span className={cn("font-semibold", w.side === "bid" ? "text-bull" : "text-bear")}>

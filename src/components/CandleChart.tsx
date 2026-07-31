@@ -35,10 +35,14 @@ export function CandleChart({ candles, zones = [], lines = [], height = 460, sym
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState({ count: 140, offset: 0 });
   const drag = useRef<{ x: number; offset: number } | null>(null);
+  const viewRef = useRef(view);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => setView((v) => ({ ...v, offset: 0 })), [symbol]);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   const visible = useMemo(() => {
     const end = Math.max(1, candles.length - view.offset);
@@ -189,9 +193,17 @@ export function CandleChart({ candles, zones = [], lines = [], height = 460, sym
             offset: Math.min(Math.max(0, candles.length - v.count), Math.max(0, v.offset - step)),
           };
         }
-        const factor = e.deltaY > 0 ? 1.12 : 0.89;
-        const count = Math.round(Math.min(600, Math.max(25, v.count * factor)));
-        return { ...v, count };
+        const normalized = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+        const count = Math.round(Math.min(600, Math.max(25, v.count * Math.exp(normalized * 0.0015))));
+        const rect = el.getBoundingClientRect();
+        const plotWidth = Math.max(1, rect.width - 74);
+        const cursorRatio = Math.min(1, Math.max(0, (e.clientX - rect.left) / plotWidth));
+        const anchorFromRight = v.offset + Math.round((1 - cursorRatio) * v.count);
+        const offset = Math.min(
+          Math.max(0, candles.length - count),
+          Math.max(0, anchorFromRight - Math.round((1 - cursorRatio) * count)),
+        );
+        return { count, offset };
       });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
@@ -205,10 +217,14 @@ export function CandleChart({ candles, zones = [], lines = [], height = 460, sym
         className="relative touch-none select-none overflow-hidden rounded-lg bg-[oklch(0.19_0.03_252)]"
         style={{ height }}
         onPointerDown={(e) => {
-          drag.current = { x: e.clientX, offset: view.offset };
-          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          drag.current = { x: e.clientX, offset: viewRef.current.offset };
+          e.currentTarget.setPointerCapture(e.pointerId);
         }}
-        onPointerUp={() => (drag.current = null)}
+        onPointerUp={(e) => {
+          drag.current = null;
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+        }}
+        onPointerCancel={() => (drag.current = null)}
         onPointerLeave={() => {
           drag.current = null;
           setHover(null);
@@ -216,15 +232,16 @@ export function CandleChart({ candles, zones = [], lines = [], height = 460, sym
         onPointerMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           setHover({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-          if (!drag.current) return;
-          const dx = e.clientX - drag.current.x;
-          const perCandle = (rect.width - 74) / view.count;
+          const activeDrag = drag.current;
+          if (!activeDrag) return;
+          const dx = e.clientX - activeDrag.x;
+          const perCandle = Math.max(1, (rect.width - 74) / viewRef.current.count);
           const shift = Math.round(dx / perCandle);
           setView((v) => ({
             ...v,
             offset: Math.min(
               Math.max(0, candles.length - v.count),
-              Math.max(0, drag.current!.offset + shift),
+              Math.max(0, activeDrag.offset + shift),
             ),
           }));
         }}
