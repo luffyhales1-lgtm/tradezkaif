@@ -1,18 +1,17 @@
 import { useState } from "react";
-import { Instagram, ShieldCheck } from "lucide-react";
+import { Instagram, LogIn, UserPlus } from "lucide-react";
+import { lovable } from "@/integrations/lovable";
 import { INSTAGRAM_URL, useAccess } from "@/lib/auth";
 import { Shell } from "@/components/Shell";
 import type { ReactNode } from "react";
 
 /** Password / admin gate rendered before any trading surface. */
 export function AccessGate({ children }: { children: ReactNode }) {
-  const { ready, session, loginAdmin, loginCode, requestAccess } = useAccess();
-  const [tab, setTab] = useState<"code" | "admin" | "request">("code");
-  const [code, setCode] = useState("");
-  const [user, setUser] = useState("");
+  const { ready, session, signIn, signUp, requestAccess, canAccess } = useAccess();
+  const [tab, setTab] = useState<"signin" | "signup">("signin");
   const [pass, setPass] = useState("");
   const [email, setEmail] = useState("");
-  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
@@ -20,7 +19,23 @@ export function AccessGate({ children }: { children: ReactNode }) {
     return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading…</div>;
   }
 
-  if (session) return <Shell>{children}</Shell>;
+  if (session && canAccess(window.location.pathname)) return <Shell>{children}</Shell>;
+
+  if (session) {
+    return (
+      <div className="grid min-h-screen place-items-center px-4 py-10">
+        <div className="panel w-full max-w-xl p-6 text-center">
+          <h1 className="font-display text-2xl font-bold text-primary">Access required</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This page is not included in your current subscription.
+            {window.location.pathname === "/math" && " Math Scanner needs separate admin permission."}
+          </p>
+          <button onClick={async () => setError((await requestAccess(`Access requested for ${window.location.pathname}`)) ?? "Request sent to admin.")} className="mt-4 rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Ask admin for access</button>
+          {error && <p className="mt-3 text-xs text-muted-foreground">{error}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid min-h-screen place-items-center px-4 py-10">
@@ -34,11 +49,11 @@ export function AccessGate({ children }: { children: ReactNode }) {
           </div>
         </div>
         <p className="mb-5 mt-3 text-center text-xs text-muted-foreground">
-          Enter your access password or contact the admin.
+          Sign in with your real email. The admin activates your subscription after approval.
         </p>
 
-        <div className="mb-4 grid grid-cols-3 gap-1 rounded-lg border border-border p-1">
-          {(["code", "admin", "request"] as const).map((t) => (
+        <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-border p-1">
+          {(["signin", "signup"] as const).map((t) => (
             <button
               key={t}
               onClick={() => {
@@ -47,65 +62,19 @@ export function AccessGate({ children }: { children: ReactNode }) {
               }}
               className={`rounded px-2 py-1.5 text-xs capitalize ${tab === t ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
             >
-              {t === "code" ? "Password" : t === "admin" ? "Sign in" : "Request"}
+              {t === "signin" ? "Sign in" : "Create account"}
             </button>
           ))}
         </div>
 
-        {tab === "code" && (
+        {(tab === "signin" || tab === "signup") && (
           <form
             className="space-y-3"
             onSubmit={async (e) => {
               e.preventDefault();
-              setError(await loginCode(code));
-            }}
-          >
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="Access password"
-              className="num w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-            <button className="w-full rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground">
-              Unlock terminal
-            </button>
-          </form>
-        )}
-
-        {tab === "admin" && (
-          <form
-            className="space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setError(loginAdmin(user, pass));
-            }}
-          >
-            <input
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              placeholder="Username or email"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-            <input
-              type="password"
-              value={pass}
-              onChange={(e) => setPass(e.target.value)}
-              placeholder="Password"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-            <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent py-2 text-sm font-semibold text-accent-foreground">
-              <ShieldCheck className="size-4" /> Sign in
-            </button>
-          </form>
-        )}
-
-        {tab === "request" && (
-          <form
-            className="space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              requestAccess(email, msg);
-              setSent(true);
+              setBusy(true);
+              setError(tab === "signin" ? await signIn(email, pass) : await signUp(email, pass));
+              setBusy(false);
             }}
           >
             <input
@@ -113,20 +82,29 @@ export function AccessGate({ children }: { children: ReactNode }) {
               onChange={(e) => setEmail(e.target.value)}
               type="email"
               required
-              placeholder="Your Gmail"
+              maxLength={255}
+              placeholder="Email address"
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
-            <textarea
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-              placeholder="Why you need access"
-              className="h-20 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            <input
+              type="password"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+              minLength={8}
+              maxLength={72}
+              required
+              placeholder="Password"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
-            <button className="w-full rounded-lg border border-primary/50 bg-primary/10 py-2 text-sm font-semibold text-primary">
-              {sent ? "Request sent to admin ✓" : "Request access"}
+            <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+              {tab === "signin" ? <LogIn className="size-4" /> : <UserPlus className="size-4" />}
+              {busy ? "Please wait…" : tab === "signin" ? "Sign in" : "Create account"}
             </button>
           </form>
         )}
+
+        <div className="my-3 flex items-center gap-3 text-[10px] text-muted-foreground"><span className="h-px flex-1 bg-border" />OR<span className="h-px flex-1 bg-border" /></div>
+        <button onClick={async () => { const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin }); if (result.error) setError(result.error.message); }} className="w-full rounded-lg border border-border py-2 text-sm hover:bg-secondary">Continue with Google</button>
 
         {error && <p className="mt-3 text-center text-xs text-bear">{error}</p>}
 
