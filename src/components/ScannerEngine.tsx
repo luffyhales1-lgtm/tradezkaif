@@ -57,16 +57,26 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [scannedAt, setScannedAt] = useState<number | null>(null);
   const [scannedCount, setScannedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [turbo, setTurbo] = useState(false);
+  const [auto, setAuto] = useState(false);
+  const [autoEvery, setAutoEvery] = useState(60);
   const abort = useRef(false);
+  const runRef = useRef<() => void>(() => {});
+  const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => () => void (abort.current = true), []);
+  useEffect(
+    () => () => {
+      abort.current = true;
+      if (autoTimer.current) clearTimeout(autoTimer.current);
+    },
+    [],
+  );
 
   const run = useCallback(async () => {
     if (running) return;
     abort.current = false;
     setRunning(true);
     setError(null);
-    setResults([]);
     setProgress(0);
     const started = Date.now();
     const tick = setInterval(() => {
@@ -77,11 +87,14 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
     try {
       const tickers = await fetchTopSymbols(config.universe);
       const symbols = tickers.map((t) => t.symbol);
+      const depth = turbo ? 200 : 300;
       let done = 0;
-      const scored = await mapLimit(symbols, 8, async (symbol) => {
-        const candles = await fetchKlines(symbol, interval, 300);
+      const scored = await mapLimit(symbols, turbo ? 24 : 14, async (symbol) => {
+        const candles = await fetchKlines(symbol, interval, depth);
         done++;
-        setProgress(Math.round((done / symbols.length) * 100));
+        if (done % 4 === 0 || done === symbols.length) {
+          setProgress(Math.round((done / symbols.length) * 100));
+        }
         const a = analyze(symbol, candles, interval);
         const sig = a.signal;
         let quant: ScanResult["quant"];
@@ -110,9 +123,12 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         return { ...sig, quant } as ScanResult;
       });
 
+      setProgress(100);
       setScannedCount(scored.length);
       const elapsed = Date.now() - started;
-      if (elapsed < config.durationMs) {
+      // Turbo publishes the moment the maths is done instead of padding to the
+      // advertised scan window.
+      if (!turbo && elapsed < config.durationMs) {
         await new Promise((r) => setTimeout(r, config.durationMs - elapsed));
       }
       if (abort.current) return;
@@ -139,7 +155,19 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setRunning(false);
       setLeft(config.durationMs / 1000);
     }
-  }, [config, interval, running]);
+  }, [config, interval, running, turbo]);
+
+  runRef.current = () => void run();
+
+  // High-frequency mode: keep re-scanning on a fixed cadence.
+  useEffect(() => {
+    if (!auto || running) return;
+    autoTimer.current = setTimeout(() => runRef.current(), autoEvery * 1000);
+    return () => {
+      if (autoTimer.current) clearTimeout(autoTimer.current);
+    };
+  }, [auto, running, autoEvery]);
+
 
   return (
     <div className="space-y-4">
