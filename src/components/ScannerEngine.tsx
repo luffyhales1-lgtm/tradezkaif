@@ -185,7 +185,11 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
                 : "bg-primary text-primary-foreground",
             )}
           >
-            {running ? `SCANNING ${left}s` : `Run ${config.durationMs / 1000}s deep scan`}
+            {running
+              ? `SCANNING ${turbo ? "" : `${left}s`}`.trim()
+              : turbo
+                ? "Run turbo scan"
+                : `Run ${config.durationMs / 1000}s deep scan`}
           </button>
         }
       >
@@ -206,6 +210,42 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
             </button>
           ))}
         </div>
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">High frequency</span>
+          <button
+            onClick={() => setTurbo(!turbo)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              turbo ? "border-warn/60 bg-warn/15 text-warn" : "border-border text-muted-foreground",
+            )}
+          >
+            Turbo {turbo ? "on" : "off"}
+          </button>
+          <button
+            onClick={() => setAuto(!auto)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              auto ? "border-primary/60 bg-primary/15 text-primary" : "border-border text-muted-foreground",
+            )}
+          >
+            Auto re-scan {auto ? "on" : "off"}
+          </button>
+          {[15, 30, 60, 120].map((s) => (
+            <button
+              key={s}
+              onClick={() => setAutoEvery(s)}
+              disabled={!auto}
+              className={cn(
+                "num rounded border border-border px-2 py-1 text-xs disabled:opacity-40",
+                autoEvery === s ? "border-primary/60 bg-primary/15 text-primary" : "text-muted-foreground",
+              )}
+            >
+              {s}s
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <Stat label="Universe" value={`${config.universe} coins`} hint="Binance high-volume USDⓈ-M" />
           <Stat label="Analysed" value={scannedCount || "—"} hint="symbols this run" />
