@@ -18,24 +18,28 @@ export const Route = createFileRoute("/admin")({
 });
 
 function Admin() {
-  const { session } = useAccess();
+  const { session, refresh } = useAccess();
   const [profiles, setProfiles] = useState<Tables<"profiles">[]>([]);
   const [subscriptions, setSubscriptions] = useState<Tables<"subscriptions">[]>([]);
   const [requests, setRequests] = useState<Tables<"access_requests">[]>([]);
+  const [roles, setRoles] = useState<Tables<"user_roles">[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [profileResult, subscriptionResult, requestResult] = await Promise.all([
+    const [profileResult, subscriptionResult, requestResult, roleResult] = await Promise.all([
       supabase.from("profiles").select("*").order("created_at", { ascending: false }),
       supabase.from("subscriptions").select("*").order("created_at", { ascending: false }),
       supabase.from("access_requests").select("*").order("created_at", { ascending: false }),
+      supabase.from("user_roles").select("*"),
     ]);
     setProfiles(profileResult.data ?? []);
     setSubscriptions(subscriptionResult.data ?? []);
     setRequests(requestResult.data ?? []);
+    setRoles(roleResult.data ?? []);
   }, []);
 
   useEffect(() => { if (session?.role === "admin") void load(); }, [session?.role, load]);
+
 
   if (session?.role !== "admin") {
     return (
