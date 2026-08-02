@@ -73,6 +73,19 @@ function Admin() {
     await load();
   };
 
+  const roleOf = (userId: string) => (roles.some((r) => r.user_id === userId && r.role === "admin") ? "admin" : "user");
+
+  const setRole = async (userId: string, next: "admin" | "user") => {
+    if (session.role !== "admin") { setNotice("Only admins can change roles."); return; }
+    if (userId === session.user.id && next === "user") { setNotice("You cannot remove your own admin role."); return; }
+    const { error } = next === "admin"
+      ? await supabase.from("user_roles").insert({ user_id: userId, role: "admin" })
+      : await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", "admin");
+    setNotice(error?.message ?? `Role updated to ${next}.`);
+    await load();
+    if (userId === session.user.id) await refresh();
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -83,7 +96,43 @@ function Admin() {
       </div>
 
       {notice && <p className="rounded border border-primary/40 bg-primary/10 p-2 text-xs text-primary">{notice}</p>}
+
+      <Panel title="Users & roles" subtitle="Switch any member between admin and user — admin-only, self-demotion blocked">
+        <div className="max-h-[420px] space-y-2 overflow-auto scroll-lock">
+          {profiles.map((profile) => {
+            const role = roleOf(profile.id);
+            const isSelf = profile.id === session.user.id;
+            return (
+              <div key={profile.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3 text-xs">
+                <span className="font-semibold">{profile.email}</span>
+                {profile.display_name && <span className="text-muted-foreground">{profile.display_name}</span>}
+                <Pill tone={role === "admin" ? "primary" : undefined}>{role}</Pill>
+                {isSelf && <Pill>you</Pill>}
+                <span className="ml-auto flex gap-1.5">
+                  <button
+                    disabled={role === "admin"}
+                    onClick={() => void setRole(profile.id, "admin")}
+                    className="rounded border border-primary/50 px-2 py-1 text-primary disabled:opacity-40"
+                  >
+                    Make admin
+                  </button>
+                  <button
+                    disabled={role === "user" || isSelf}
+                    onClick={() => void setRole(profile.id, "user")}
+                    className="rounded border border-border px-2 py-1 disabled:opacity-40"
+                  >
+                    Make user
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+          {!profiles.length && <p className="py-6 text-center text-muted-foreground">No registered members yet.</p>}
+        </div>
+      </Panel>
+
       <Panel title="Members & subscriptions" subtitle="Activate a tier, set its duration, or revoke access immediately">
+
           <div className="max-h-[520px] space-y-2 overflow-auto scroll-lock">
             {profiles.map((profile) => {
               const sub = subscriptions.find((item) => item.user_id === profile.id);
