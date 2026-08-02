@@ -87,7 +87,7 @@ export function useTopSymbols(limit = 200) {
 /** Live candles: REST seed + kline websocket, updating in place. */
 export function useCandles(symbol: string, interval: Interval, limit = 400) {
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [live, pushLive] = useThrottledState<Candle[]>([], 120);
+  const [live, pushLive] = useThrottledState<Candle[]>([], 250);
   const ref = useRef<Candle[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -168,7 +168,7 @@ export function useTrades(symbol: string, minUsd = 0, cap = 300) {
 
 /** Order book snapshot refreshed by the diff stream. */
 export function useBook(symbol: string, depth = 500) {
-  const [book, push] = useThrottledState<Book | null>(null, 250);
+  const [book, push] = useThrottledState<Book | null>(null, 450);
   const ref = useRef<Map<number, number>[]>([new Map(), new Map()]);
 
   useEffect(() => {
@@ -218,7 +218,7 @@ export function useBook(symbol: string, depth = 500) {
 }
 
 export function useMarkPrice(symbol: string) {
-  const [price, push] = useThrottledState<number>(0, 200);
+  const [price, push] = useThrottledState<number>(0, 400);
   useEffect(
     () =>
       openStream([`${symbol.toLowerCase()}@markPrice@1s`], (_s, d) => push(Number(d.p))),

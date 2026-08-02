@@ -57,16 +57,26 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [scannedAt, setScannedAt] = useState<number | null>(null);
   const [scannedCount, setScannedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [turbo, setTurbo] = useState(false);
+  const [auto, setAuto] = useState(false);
+  const [autoEvery, setAutoEvery] = useState(60);
   const abort = useRef(false);
+  const runRef = useRef<() => void>(() => {});
+  const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => () => void (abort.current = true), []);
+  useEffect(
+    () => () => {
+      abort.current = true;
+      if (autoTimer.current) clearTimeout(autoTimer.current);
+    },
+    [],
+  );
 
   const run = useCallback(async () => {
     if (running) return;
     abort.current = false;
     setRunning(true);
     setError(null);
-    setResults([]);
     setProgress(0);
     const started = Date.now();
     const tick = setInterval(() => {
@@ -77,11 +87,14 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
     try {
       const tickers = await fetchTopSymbols(config.universe);
       const symbols = tickers.map((t) => t.symbol);
+      const depth = turbo ? 200 : 300;
       let done = 0;
-      const scored = await mapLimit(symbols, 8, async (symbol) => {
-        const candles = await fetchKlines(symbol, interval, 300);
+      const scored = await mapLimit(symbols, turbo ? 24 : 14, async (symbol) => {
+        const candles = await fetchKlines(symbol, interval, depth);
         done++;
-        setProgress(Math.round((done / symbols.length) * 100));
+        if (done % 4 === 0 || done === symbols.length) {
+          setProgress(Math.round((done / symbols.length) * 100));
+        }
         const a = analyze(symbol, candles, interval);
         const sig = a.signal;
         let quant: ScanResult["quant"];
@@ -110,9 +123,12 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         return { ...sig, quant } as ScanResult;
       });
 
+      setProgress(100);
       setScannedCount(scored.length);
       const elapsed = Date.now() - started;
-      if (elapsed < config.durationMs) {
+      // Turbo publishes the moment the maths is done instead of padding to the
+      // advertised scan window.
+      if (!turbo && elapsed < config.durationMs) {
         await new Promise((r) => setTimeout(r, config.durationMs - elapsed));
       }
       if (abort.current) return;
@@ -139,7 +155,19 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setRunning(false);
       setLeft(config.durationMs / 1000);
     }
-  }, [config, interval, running]);
+  }, [config, interval, running, turbo]);
+
+  runRef.current = () => void run();
+
+  // High-frequency mode: keep re-scanning on a fixed cadence.
+  useEffect(() => {
+    if (!auto || running) return;
+    autoTimer.current = setTimeout(() => runRef.current(), autoEvery * 1000);
+    return () => {
+      if (autoTimer.current) clearTimeout(autoTimer.current);
+    };
+  }, [auto, running, autoEvery]);
+
 
   return (
     <div className="space-y-4">
@@ -157,7 +185,11 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
                 : "bg-primary text-primary-foreground",
             )}
           >
-            {running ? `SCANNING ${left}s` : `Run ${config.durationMs / 1000}s deep scan`}
+            {running
+              ? `SCANNING ${turbo ? "" : `${left}s`}`.trim()
+              : turbo
+                ? "Run turbo scan"
+                : `Run ${config.durationMs / 1000}s deep scan`}
           </button>
         }
       >
@@ -178,6 +210,42 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
             </button>
           ))}
         </div>
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">High frequency</span>
+          <button
+            onClick={() => setTurbo(!turbo)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              turbo ? "border-warn/60 bg-warn/15 text-warn" : "border-border text-muted-foreground",
+            )}
+          >
+            Turbo {turbo ? "on" : "off"}
+          </button>
+          <button
+            onClick={() => setAuto(!auto)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              auto ? "border-primary/60 bg-primary/15 text-primary" : "border-border text-muted-foreground",
+            )}
+          >
+            Auto re-scan {auto ? "on" : "off"}
+          </button>
+          {[15, 30, 60, 120].map((s) => (
+            <button
+              key={s}
+              onClick={() => setAutoEvery(s)}
+              disabled={!auto}
+              className={cn(
+                "num rounded border border-border px-2 py-1 text-xs disabled:opacity-40",
+                autoEvery === s ? "border-primary/60 bg-primary/15 text-primary" : "text-muted-foreground",
+              )}
+            >
+              {s}s
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <Stat label="Universe" value={`${config.universe} coins`} hint="Binance high-volume USDⓈ-M" />
           <Stat label="Analysed" value={scannedCount || "—"} hint="symbols this run" />

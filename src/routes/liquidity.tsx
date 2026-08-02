@@ -29,7 +29,14 @@ function Liquidity() {
   const price = useMarkPrice(symbol);
   const [minWall, setMinWall] = useLocalState("cotraders.liq.wall", 10_000);
 
-  const zones = useMemo(() => (candles.length > 60 ? liquidityZones(candles) : []), [candles]);
+  // Recompute the map only when a candle actually closes, not on every tick —
+  // that is what made this page crawl.
+  const barKey = candles.length ? `${candles.length}:${candles[candles.length - 1].t}` : "";
+  const zones = useMemo(
+    () => (candles.length > 60 ? liquidityZones(candles) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [barKey],
+  );
   const ba = useMemo(() => bookAnalysis(book, minWall), [book, minWall]);
 
   return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Candle } from "@/lib/binance";
 
 export type ChartZone = {
@@ -25,190 +25,319 @@ type Props = {
   symbol: string;
 };
 
+const MIN_COUNT = 20;
+const MAX_COUNT = 600;
+const PAD_R = 74;
+const PAD_B = 22;
+
 /**
- * Canvas candle chart with wheel zoom, drag pan and overlay rendering.
- * Draws only on new frames of data or view changes to keep the UI smooth,
- * and swallows wheel events so the page never scrolls while zooming.
+ * Canvas candle chart driven entirely by refs + a single rAF loop.
+ * React never re-renders on pan/zoom/crosshair, so the chart stays smooth
+ * even while websocket data streams in behind it.
+ * Supports wheel zoom, drag pan, two-finger pinch and on-screen controls.
  */
 export function CandleChart({ candles, zones = [], lines = [], height = 460, symbol }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [view, setView] = useState({ count: 140, offset: 0 });
-  const drag = useRef<{ x: number; offset: number } | null>(null);
-  const viewRef = useRef(view);
-  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
-  const [failed, setFailed] = useState(false);
 
-  useEffect(() => setView((v) => ({ ...v, offset: 0 })), [symbol]);
+  const candlesRef = useRef(candles);
+  const zonesRef = useRef(zones);
+  const linesRef = useRef(lines);
+  const viewRef = useRef({ count: 140, offset: 0 });
+  const hoverRef = useRef<{ x: number; y: number } | null>(null);
+  const dirty = useRef(true);
+  const [countLabel, setCountLabel] = useState(140);
+
+  candlesRef.current = candles;
+  zonesRef.current = zones;
+  linesRef.current = lines;
+
+  // any new data frame or overlay change requests one repaint
   useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
+    dirty.current = true;
+  }, [candles, zones, lines, height]);
 
-  const visible = useMemo(() => {
-    const end = Math.max(1, candles.length - view.offset);
-    return candles.slice(Math.max(0, end - view.count), end);
-  }, [candles, view]);
+  useEffect(() => {
+    viewRef.current = { count: viewRef.current.count, offset: 0 };
+    dirty.current = true;
+  }, [symbol]);
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const wrap = wrapRef.current;
-    if (!canvas || !wrap || !visible.length) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      setFailed(true);
-      return;
-    }
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = wrap.clientWidth;
-    const h = height;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+  const clampView = (count: number, offset: number) => {
+    const len = candlesRef.current.length || 1;
+    const c = Math.round(Math.min(MAX_COUNT, Math.max(MIN_COUNT, count)));
+    const o = Math.min(Math.max(0, len - c), Math.max(0, Math.round(offset)));
+    return { count: c, offset: o };
+  };
 
-    const padR = 74;
-    const padB = 22;
-    const plotW = w - padR;
-    const plotH = h - padB;
+  const setView = (count: number, offset: number) => {
+    const next = clampView(count, offset);
+    const prev = viewRef.current;
+    if (next.count === prev.count && next.offset === prev.offset) return;
+    viewRef.current = next;
+    dirty.current = true;
+    if (next.count !== prev.count) setCountLabel(next.count);
+  };
 
-    const prices = visible.flatMap((c) => [c.h, c.l]);
-    const zonePrices = zones.flatMap((z) => [z.low, z.high]);
-    const linePrices = lines.map((l) => l.price);
-    const all = [...prices, ...zonePrices, ...linePrices].filter((n) => Number.isFinite(n));
-    let min = Math.min(...all);
-    let max = Math.max(...all);
-    const pad = (max - min) * 0.08 || max * 0.001;
-    min -= pad;
-    max += pad;
-    const y = (p: number) => plotH - ((p - min) / (max - min || 1)) * plotH;
-    const cw = plotW / visible.length;
+  // ---------- render loop ----------
+  useEffect(() => {
+    let raf = 0;
+    let lastW = 0;
 
-    // grid
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    ctx.font = "10px ui-monospace, monospace";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 6; i++) {
-      const py = (plotH / 6) * i;
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(plotW, py);
-      ctx.stroke();
-      const price = max - ((max - min) / 6) * i;
-      ctx.fillText(price >= 1000 ? price.toFixed(1) : price.toFixed(5), plotW + 6, py + 3);
-    }
+    const render = () => {
+      raf = requestAnimationFrame(render);
+      const canvas = canvasRef.current;
+      const wrap = wrapRef.current;
+      if (!canvas || !wrap) return;
+      const w = wrap.clientWidth;
+      if (w !== lastW) {
+        lastW = w;
+        dirty.current = true;
+      }
+      if (!dirty.current) return;
+      dirty.current = false;
 
-    // zones
-    zones.forEach((z) => {
-      const top = y(Math.max(z.low, z.high));
-      const bottom = y(Math.min(z.low, z.high));
-      ctx.fillStyle = z.color;
-      ctx.fillRect(0, top, plotW, Math.max(2, bottom - top));
-      ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.font = "10px ui-sans-serif, system-ui";
-      ctx.fillText(z.label, 6, top - 3 < 10 ? top + 11 : top - 3);
-    });
+      const all = candlesRef.current;
+      if (!all.length || !w) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-    // candles
-    visible.forEach((c, i) => {
-      const x = i * cw + cw / 2;
-      const up = c.c >= c.o;
-      ctx.strokeStyle = up ? "#3ddc97" : "#ff5f56";
-      ctx.fillStyle = up ? "#3ddc97" : "#ff5f56";
-      ctx.beginPath();
-      ctx.moveTo(x, y(c.h));
-      ctx.lineTo(x, y(c.l));
-      ctx.stroke();
-      const bodyTop = y(Math.max(c.o, c.c));
-      const bodyH = Math.max(1, Math.abs(y(c.o) - y(c.c)));
-      ctx.fillRect(x - Math.max(1, cw * 0.32), bodyTop, Math.max(2, cw * 0.64), bodyH);
-    });
+      const { count, offset } = viewRef.current;
+      const end = Math.max(1, all.length - offset);
+      const visible = all.slice(Math.max(0, end - count), end);
+      if (!visible.length) return;
 
-    // lines
-    lines.forEach((l) => {
-      const py = y(l.price);
-      ctx.strokeStyle = l.color;
-      ctx.setLineDash(l.dashed ? [5, 4] : []);
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(plotW, py);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = l.color;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const h = height;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const plotW = Math.max(1, w - PAD_R);
+      const plotH = h - PAD_B;
+      const zonesNow = zonesRef.current;
+      const linesNow = linesRef.current;
+
+      let min = Infinity;
+      let max = -Infinity;
+      for (const c of visible) {
+        if (c.h > max) max = c.h;
+        if (c.l < min) min = c.l;
+      }
+      for (const z of zonesNow) {
+        if (Number.isFinite(z.high)) max = Math.max(max, z.high);
+        if (Number.isFinite(z.low)) min = Math.min(min, z.low);
+      }
+      for (const l of linesNow) {
+        if (Number.isFinite(l.price)) {
+          max = Math.max(max, l.price);
+          min = Math.min(min, l.price);
+        }
+      }
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+      const pad = (max - min) * 0.08 || Math.abs(max) * 0.001 || 1;
+      min -= pad;
+      max += pad;
+      const span = max - min || 1;
+      const y = (p: number) => plotH - ((p - min) / span) * plotH;
+      const cw = plotW / visible.length;
+      const fmt = (p: number) => (p >= 1000 ? p.toFixed(1) : p >= 1 ? p.toFixed(3) : p.toFixed(5));
+
+      // grid
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
       ctx.font = "10px ui-monospace, monospace";
-      ctx.fillText(l.label, plotW - ctx.measureText(l.label).width - 6, py - 3);
-    });
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 6; i++) {
+        const py = Math.round((plotH / 6) * i) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, py);
+        ctx.lineTo(plotW, py);
+        ctx.stroke();
+        ctx.fillText(fmt(max - (span / 6) * i), plotW + 6, py + 3);
+      }
 
-    // last price
-    const last = visible.at(-1)!;
-    const ly = y(last.c);
-    ctx.fillStyle = last.c >= last.o ? "#3ddc97" : "#ff5f56";
-    ctx.fillRect(plotW, ly - 8, padR, 16);
-    ctx.fillStyle = "#0b1220";
-    ctx.font = "bold 10px ui-monospace, monospace";
-    ctx.fillText(last.c >= 1000 ? last.c.toFixed(1) : last.c.toFixed(5), plotW + 5, ly + 3);
+      // zones
+      for (const z of zonesNow) {
+        const top = y(Math.max(z.low, z.high));
+        const bottom = y(Math.min(z.low, z.high));
+        ctx.fillStyle = z.color;
+        ctx.fillRect(0, top, plotW, Math.max(2, bottom - top));
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.font = "10px ui-sans-serif, system-ui";
+        ctx.fillText(z.label, 6, top - 3 < 10 ? top + 11 : top - 3);
+      }
 
-    // crosshair
-    if (hover) {
-      ctx.strokeStyle = "rgba(255,255,255,0.25)";
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(hover.x, 0);
-      ctx.lineTo(hover.x, plotH);
-      ctx.moveTo(0, hover.y);
-      ctx.lineTo(plotW, hover.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      const p = min + ((plotH - hover.y) / plotH) * (max - min);
-      ctx.fillStyle = "rgba(0,0,0,0.75)";
-      ctx.fillRect(plotW, hover.y - 8, padR, 16);
-      ctx.fillStyle = "#fff";
-      ctx.fillText(p >= 1000 ? p.toFixed(1) : p.toFixed(5), plotW + 5, hover.y + 3);
-    }
-  }, [visible, zones, lines, height, hover]);
+      // candles
+      const bodyW = Math.max(1, cw * 0.64);
+      for (let i = 0; i < visible.length; i++) {
+        const c = visible[i];
+        const x = Math.round(i * cw + cw / 2) + 0.5;
+        const up = c.c >= c.o;
+        const color = up ? "#3ddc97" : "#ff5f56";
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x, y(c.h));
+        ctx.lineTo(x, y(c.l));
+        ctx.stroke();
+        const bodyTop = y(Math.max(c.o, c.c));
+        const bodyH = Math.max(1, Math.abs(y(c.o) - y(c.c)));
+        ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
+      }
 
-  useEffect(() => {
-    const raf = requestAnimationFrame(draw);
+      // lines
+      for (const l of linesNow) {
+        const py = y(l.price);
+        ctx.strokeStyle = l.color;
+        ctx.setLineDash(l.dashed ? [5, 4] : []);
+        ctx.beginPath();
+        ctx.moveTo(0, py);
+        ctx.lineTo(plotW, py);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = l.color;
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.fillText(l.label, plotW - ctx.measureText(l.label).width - 6, py - 3);
+      }
+
+      // last price tag
+      const last = visible[visible.length - 1];
+      const ly = y(last.c);
+      ctx.fillStyle = last.c >= last.o ? "#3ddc97" : "#ff5f56";
+      ctx.fillRect(plotW, ly - 8, PAD_R, 16);
+      ctx.fillStyle = "#0b1220";
+      ctx.font = "bold 10px ui-monospace, monospace";
+      ctx.fillText(fmt(last.c), plotW + 5, ly + 3);
+
+      // crosshair
+      const hover = hoverRef.current;
+      if (hover && hover.x < plotW) {
+        ctx.strokeStyle = "rgba(255,255,255,0.25)";
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(hover.x, 0);
+        ctx.lineTo(hover.x, plotH);
+        ctx.moveTo(0, hover.y);
+        ctx.lineTo(plotW, hover.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const p = min + ((plotH - hover.y) / plotH) * span;
+        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        ctx.fillRect(plotW, hover.y - 8, PAD_R, 16);
+        ctx.fillStyle = "#fff";
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.fillText(fmt(p), plotW + 5, hover.y + 3);
+      }
+    };
+
+    raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [draw]);
+  }, [height]);
 
-  useEffect(() => {
-    const onResize = () => draw();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [draw]);
-
+  // ---------- gestures ----------
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+
+    const pointers = new Map<number, { x: number; y: number }>();
+    let dragStart: { x: number; offset: number } | null = null;
+    let pinchStart: { dist: number; count: number } | null = null;
+
+    const zoomAt = (factor: number, clientX: number) => {
+      const rect = el.getBoundingClientRect();
+      const plotW = Math.max(1, rect.width - PAD_R);
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / plotW));
+      const { count, offset } = viewRef.current;
+      const next = Math.round(Math.min(MAX_COUNT, Math.max(MIN_COUNT, count * factor)));
+      const anchorFromRight = offset + (1 - ratio) * count;
+      setView(next, anchorFromRight - (1 - ratio) * next);
+    };
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      setView((v) => {
-        if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-          const step = Math.sign(e.deltaX || e.deltaY) * Math.max(1, Math.round(v.count * 0.05));
-          return {
-            ...v,
-            offset: Math.min(Math.max(0, candles.length - v.count), Math.max(0, v.offset - step)),
-          };
-        }
-        const normalized = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
-        const count = Math.round(Math.min(600, Math.max(25, v.count * Math.exp(normalized * 0.0015))));
-        const rect = el.getBoundingClientRect();
-        const plotWidth = Math.max(1, rect.width - 74);
-        const cursorRatio = Math.min(1, Math.max(0, (e.clientX - rect.left) / plotWidth));
-        const anchorFromRight = v.offset + Math.round((1 - cursorRatio) * v.count);
-        const offset = Math.min(
-          Math.max(0, candles.length - count),
-          Math.max(0, anchorFromRight - Math.round((1 - cursorRatio) * count)),
-        );
-        return { count, offset };
-      });
+      const { count, offset } = viewRef.current;
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        const step = Math.sign(e.deltaX || e.deltaY) * Math.max(1, Math.round(count * 0.05));
+        setView(count, offset - step);
+        return;
+      }
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      zoomAt(Math.exp(dy * 0.0015), e.clientX);
     };
+
+    const onPointerDown = (e: PointerEvent) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      el.setPointerCapture?.(e.pointerId);
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, count: viewRef.current.count };
+        dragStart = null;
+      } else {
+        dragStart = { x: e.clientX, offset: viewRef.current.offset };
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      if (e.pointerType === "mouse") {
+        hoverRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        dirty.current = true;
+      }
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointers.size >= 2 && pinchStart) {
+        const [a, b] = [...pointers.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        const mid = (a.x + b.x) / 2;
+        const target = pinchStart.count * (pinchStart.dist / dist);
+        zoomAt(target / viewRef.current.count, mid);
+        return;
+      }
+      if (!dragStart) return;
+      e.preventDefault();
+      const perCandle = Math.max(1, (rect.width - PAD_R) / viewRef.current.count);
+      setView(viewRef.current.count, dragStart.offset + (e.clientX - dragStart.x) / perCandle);
+    };
+
+    const endPointer = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinchStart = null;
+      if (pointers.size === 0) dragStart = null;
+      else {
+        const [first] = [...pointers.values()];
+        dragStart = { x: first.x, offset: viewRef.current.offset };
+      }
+    };
+
+    const onLeave = () => {
+      hoverRef.current = null;
+      dirty.current = true;
+    };
+
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [candles.length]);
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove, { passive: false });
+    el.addEventListener("pointerup", endPointer);
+    el.addEventListener("pointercancel", endPointer);
+    el.addEventListener("pointerleave", onLeave);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", endPointer);
+      el.removeEventListener("pointercancel", endPointer);
+      el.removeEventListener("pointerleave", onLeave);
+    };
+  }, []);
+
+  const btn =
+    "rounded border border-border bg-background/80 px-2 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary active:bg-secondary";
 
   return (
     <div className="relative">
@@ -216,48 +345,64 @@ export function CandleChart({ candles, zones = [], lines = [], height = 460, sym
         ref={wrapRef}
         className="relative touch-none select-none overflow-hidden rounded-lg bg-[oklch(0.19_0.03_252)]"
         style={{ height }}
-        onPointerDown={(e) => {
-          drag.current = { x: e.clientX, offset: viewRef.current.offset };
-          e.currentTarget.setPointerCapture(e.pointerId);
-        }}
-        onPointerUp={(e) => {
-          drag.current = null;
-          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-        }}
-        onPointerCancel={() => (drag.current = null)}
-        onPointerLeave={() => {
-          drag.current = null;
-          setHover(null);
-        }}
-        onPointerMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          setHover({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-          const activeDrag = drag.current;
-          if (!activeDrag) return;
-          const dx = e.clientX - activeDrag.x;
-          const perCandle = Math.max(1, (rect.width - 74) / viewRef.current.count);
-          const shift = Math.round(dx / perCandle);
-          setView((v) => ({
-            ...v,
-            offset: Math.min(
-              Math.max(0, candles.length - v.count),
-              Math.max(0, activeDrag.offset + shift),
-            ),
-          }));
-        }}
       >
         <canvas ref={canvasRef} className="block" />
-        {(!visible.length || failed) && (
+        {!candles.length && (
           <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
-            {failed ? "Canvas unavailable — chart data still streaming below." : "Loading live candles…"}
+            Loading live candles…
           </div>
         )}
+        <div className="absolute right-2 top-2 flex gap-1">
+          <button
+            className={btn}
+            aria-label="Zoom in"
+            onClick={() => setView(viewRef.current.count * 0.75, viewRef.current.offset)}
+          >
+            +
+          </button>
+          <button
+            className={btn}
+            aria-label="Zoom out"
+            onClick={() => setView(viewRef.current.count * 1.35, viewRef.current.offset)}
+          >
+            −
+          </button>
+        </div>
+        <div className="absolute bottom-2 left-2 flex gap-1">
+          <button
+            className={btn}
+            aria-label="Pan left"
+            onClick={() =>
+              setView(
+                viewRef.current.count,
+                viewRef.current.offset + Math.max(1, Math.round(viewRef.current.count * 0.25)),
+              )
+            }
+          >
+            ←
+          </button>
+          <button
+            className={btn}
+            aria-label="Pan right"
+            onClick={() =>
+              setView(
+                viewRef.current.count,
+                viewRef.current.offset - Math.max(1, Math.round(viewRef.current.count * 0.25)),
+              )
+            }
+          >
+            →
+          </button>
+        </div>
       </div>
       <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>Scroll = zoom · Shift+scroll or drag = pan · {view.count} candles</span>
+        <span>Scroll / pinch = zoom · drag = pan · {countLabel} candles</span>
         <button
           className="rounded border border-border px-2 py-0.5 hover:bg-secondary"
-          onClick={() => setView({ count: 140, offset: 0 })}
+          onClick={() => {
+            setView(140, 0);
+            setCountLabel(140);
+          }}
         >
           Reset view
         </button>
