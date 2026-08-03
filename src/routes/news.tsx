@@ -99,7 +99,7 @@ async function fetchFeed(
     if (res.ok) {
       const json = (await res.json()) as { status?: string; items?: Rss2JsonItem[] };
       if (json.status === "ok" && json.items?.length) {
-        return json.items.map((n) => ({
+        return json.items.slice(0, 20).map((n) => ({
           title: (n.title ?? "").trim(),
           link: n.link ?? "#",
           ts: toTs(n.pubDate),
@@ -113,9 +113,10 @@ async function fetchFeed(
   }
 
   const res = await fetch(
-    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`)}`,
     { signal, cache: "no-store" },
   );
+
   if (!res.ok) throw new Error(`${source} ${res.status}`);
   const xml = await res.text();
   const doc = new DOMParser().parseFromString(xml, "text/xml");
