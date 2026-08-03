@@ -297,8 +297,14 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
               </button>
             </div>
           }
-        />
+        >
+          <p className="text-xs text-muted-foreground">
+            CSV opens in Excel/Sheets; JSON carries the same fields plus full confluence detail for
+            bots and journals.
+          </p>
+        </Panel>
       )}
+
 
       <div className="grid gap-3 lg:grid-cols-2">
         {results.map((s) => (
