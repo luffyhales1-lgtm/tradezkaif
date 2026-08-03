@@ -2,7 +2,9 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { Instagram, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 import { INSTAGRAM_URL, useAccess } from "@/lib/auth";
+import { useLiveEngine } from "@/hooks/useLiveEngine";
 import { cn } from "@/lib/utils";
+
 
 export const NAV = [
   { to: "/", label: "Terminal" },
