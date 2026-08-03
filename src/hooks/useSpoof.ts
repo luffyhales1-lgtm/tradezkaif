@@ -18,9 +18,24 @@ export type WallTrack = {
   status: "tracking" | "spoof" | "real" | "filled";
   confidence: number;
   cancelledUsd: number;
+  /** Live 0-100 spoof risk while the wall is still being watched. */
+  risk: number;
+  flagged?: boolean;
+
 };
 
 export const CONFIRM_MS = 30_000;
+export const HIGH_RISK = 70;
+
+/** Live spoof-risk score for a wall that has not finished its 30s window. */
+function liveRisk(t: WallTrack, price: number, minUsd: number, now: number) {
+  const shrink = t.peakUsd > 0 ? 1 - t.usd / t.peakUsd : 0; // wall being pulled down
+  const size = Math.min(1, t.peakUsd / (minUsd * 4)); // oversized = attention grabbing
+  const dist = price > 0 ? Math.min(1, (Math.abs(t.price - price) / price) * 120) : 0;
+  const age = Math.min(1, (now - t.firstSeen) / CONFIRM_MS);
+  return Math.round(Math.min(99, shrink * 55 + size * 22 + dist * 15 + age * 8));
+}
+
 
 export function useSpoofRadar(
   symbol: string,
@@ -66,7 +81,9 @@ export function useSpoofRadar(
               status: "tracking",
               confidence: 0,
               cancelledUsd: 0,
+              risk: 0,
             });
+
           }
         });
     };
@@ -80,6 +97,7 @@ export function useSpoofRadar(
       const touched =
         price > 0 &&
         (t.side === "bid" ? price <= t.price * 1.0002 : price >= t.price * 0.9998);
+      t.risk = liveRisk(t, price, minUsd, now);
 
       if (t.status === "tracking" && touched) {
         t.status = "filled";
@@ -93,36 +111,52 @@ export function useSpoofRadar(
           const dist = Math.abs(t.price - price) / (price || 1);
           t.status = "spoof";
           t.cancelledUsd = t.peakUsd;
+          // Fully cancelled, never-touched walls score in the high 90s.
           t.confidence = Math.min(
-            100,
-            Math.round(60 + Math.min(30, (t.peakUsd / minUsd) * 12) + Math.min(10, dist * 900)),
+            99,
+            Math.round(
+              72 +
+                Math.min(14, (t.peakUsd / minUsd) * 7) +
+                Math.min(8, dist * 800) +
+                Math.min(5, (age / CONFIRM_MS) * 5),
+            ),
           );
           newlyConfirmed.push({ ...t });
           pushLog({
             kind: "spoof",
             symbol,
-            text: `SPOOF CONFIRMED · ${t.side === "bid" ? "Bid" : "Ask"} wall @ ${t.price} pulled`,
-            meta: `${t.confidence}/100 confidence · $${(t.peakUsd / 1e6).toFixed(2)}M cancelled after ${(age / 1000).toFixed(0)}s`,
+            text: `SPOOF CONFIRMED ${t.confidence}/100 · ${t.side === "bid" ? "Bid" : "Ask"} wall @ ${t.price} pulled`,
+            meta: `${t.confidence >= HIGH_RISK ? "HIGH RISK · " : ""}$${(t.peakUsd / 1e6).toFixed(2)}M cancelled after ${(age / 1000).toFixed(0)}s`,
           });
         }
-          tracks.current.delete(id);
+        tracks.current.delete(id);
         return;
+      }
+      if (t.status === "tracking" && t.risk >= HIGH_RISK && !t.flagged) {
+        t.flagged = true;
+        pushLog({
+          kind: "spoof",
+          symbol,
+          text: `SPOOF RISK ${t.risk}/100 · ${t.side === "bid" ? "Bid" : "Ask"} wall @ ${t.price} shrinking`,
+          meta: `$${(t.peakUsd / 1e6).toFixed(2)}M peak → $${(t.usd / 1e6).toFixed(2)}M now · verdict in ${Math.max(0, Math.round((CONFIRM_MS - age) / 1000))}s`,
+        });
       }
       if (t.status === "tracking" && age >= CONFIRM_MS && seen.has(id)) {
         t.status = "real";
-        t.confidence = Math.min(100, Math.round(55 + (t.peakUsd / minUsd) * 15));
+        t.confidence = Math.min(99, Math.round(70 + (t.peakUsd / minUsd) * 10));
         newlyConfirmed.push({ ...t });
         pushLog({
           kind: "whale",
           symbol,
-          text: `REAL WALL · ${t.side === "bid" ? "Bid" : "Ask"} @ ${t.price} held 30s`,
+          text: `REAL WALL ${t.confidence}/100 · ${t.side === "bid" ? "Bid" : "Ask"} @ ${t.price} held 30s`,
           meta: `$${(t.usd / 1e6).toFixed(2)}M resting`,
         });
       }
       if (now - t.lastSeen > 120_000) tracks.current.delete(id);
     });
 
-    setList([...tracks.current.values()].sort((a, b) => b.peakUsd - a.peakUsd).slice(0, 20));
+    setList([...tracks.current.values()].sort((a, b) => b.risk - a.risk || b.peakUsd - a.peakUsd).slice(0, 20));
+
     if (newlyConfirmed.length) {
       setConfirmed((prev) => [...newlyConfirmed, ...prev].slice(0, 40));
     }

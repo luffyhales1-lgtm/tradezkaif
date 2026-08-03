@@ -2,7 +2,9 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { Instagram, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 import { INSTAGRAM_URL, useAccess } from "@/lib/auth";
+import { useLiveEngine } from "@/hooks/useLiveEngine";
 import { cn } from "@/lib/utils";
+
 
 export const NAV = [
   { to: "/", label: "Terminal" },
@@ -25,6 +27,9 @@ export const NAV = [
 export function Shell({ children }: { children: ReactNode }) {
   const { session, logout, canAccess } = useAccess();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  // Runs everywhere so the Live Log stays populated off-page.
+  useLiveEngine();
+
 
   return (
     <div className="min-h-screen">

@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { SymbolPicker } from "@/components/SymbolPicker";
 import { Highlighted, Panel, Pill, Stat } from "@/components/ui-bits";
 import { useBook, useCandles, useLocalState, useMarkPrice, useSymbolState } from "@/hooks/useMarket";
-import { bookAnalysis, liquidityZones } from "@/lib/analysis";
+import { bookAnalysis, liquidityZones, type Zone } from "@/lib/analysis";
+
 import { fmtPrice, fmtUsd } from "@/lib/binance";
 import { cn } from "@/lib/utils";
 
@@ -22,29 +23,83 @@ export const Route = createFileRoute("/liquidity")({
   component: Liquidity,
 });
 
+const RANGES = [
+  { label: "±1%", pct: 0.01 },
+  { label: "±2.5%", pct: 0.025 },
+  { label: "±5%", pct: 0.05 },
+  { label: "All", pct: 0 },
+] as const;
+
 function Liquidity() {
   const { symbol, setSymbol, interval, setInterval } = useSymbolState();
   const { candles } = useCandles(symbol, interval, 400);
   const book = useBook(symbol);
   const price = useMarkPrice(symbol);
   const [minWall, setMinWall] = useLocalState("cotraders.liq.wall", 10_000);
+  const [rangePct, setRangePct] = useLocalState("cotraders.liq.range", 0.025);
+  const [limitRows, setLimitRows] = useLocalState("cotraders.liq.limit", true);
 
-  // Recompute the map only when a candle actually closes, not on every tick —
-  // that is what made this page crawl.
+  // Incremental map: the heavy pivot/zone scan only re-runs when a candle
+  // actually closes. Live ticks reuse the cached zones and only re-filter.
   const barKey = candles.length ? `${candles.length}:${candles[candles.length - 1].t}` : "";
-  const zones = useMemo(
-    () => (candles.length > 60 ? liquidityZones(candles) : []),
+  const cache = useRef<{ key: string; zones: Zone[] }>({
+    key: "",
+    zones: [],
+  });
+  const allZones = useMemo(() => {
+    if (candles.length <= 60) return cache.current.zones;
+    if (cache.current.key !== barKey) {
+      cache.current = { key: barKey, zones: liquidityZones(candles) };
+    }
+    return cache.current.zones;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [barKey],
-  );
+  }, [barKey]);
+
+  // Visible-range clamp keeps rendering cheap when the map gets crowded.
+  const zones = useMemo(() => {
+    if (!rangePct || !price) return allZones;
+    const filtered = allZones.filter(
+      (z) => Math.abs((z.low + z.high) / 2 - price) / price <= rangePct,
+    );
+    return limitRows ? filtered.slice(0, 12) : filtered;
+  }, [allZones, price, rangePct, limitRows]);
+
   const ba = useMemo(() => bookAnalysis(book, minWall), [book, minWall]);
+  const walls = useMemo(() => {
+    const w = ba?.walls ?? [];
+    const inRange =
+      rangePct && price ? w.filter((x) => Math.abs(x.price - price) / price <= rangePct) : w;
+    return limitRows ? inRange.slice(0, 15) : inRange;
+  }, [ba, price, rangePct, limitRows]);
 
   return (
     // overscroll containment keeps the page from jumping while scrolling these lists
     <div className="space-y-4 overscroll-contain">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SymbolPicker symbol={symbol} setSymbol={setSymbol} interval={interval} setInterval={setInterval} />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Visible range</span>
+          {RANGES.map((r) => (
+            <button
+              key={r.label}
+              onClick={() => setRangePct(r.pct)}
+              className={cn(
+                "num rounded border border-border px-2 py-1 text-xs",
+                rangePct === r.pct ? "border-accent/60 bg-accent/15 text-accent" : "text-muted-foreground",
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
+          <button
+            onClick={() => setLimitRows(!limitRows)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              limitRows ? "border-primary/60 bg-primary/15 text-primary" : "border-border text-muted-foreground",
+            )}
+          >
+            Fast render {limitRows ? "on" : "off"}
+          </button>
           <span className="text-xs text-muted-foreground">Whale size</span>
           {[10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000].map((v) => (
             <button
@@ -60,6 +115,7 @@ function Liquidity() {
           ))}
         </div>
       </div>
+
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel title="Liquidity pools" subtitle="Equal highs / lows still resting">

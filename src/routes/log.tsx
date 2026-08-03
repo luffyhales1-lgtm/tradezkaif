@@ -47,6 +47,11 @@ function LogPage() {
 
 
   const shown = events.filter((e) => active.includes(e.kind));
+  const counts = KINDS.reduce<Record<string, number>>((acc, k) => {
+    acc[k] = events.filter((e) => e.kind === k).length;
+    return acc;
+  }, {});
+  const lastTs = events[0]?.ts ?? 0;
 
   return (
     <div className="space-y-4">
@@ -62,12 +67,18 @@ function LogPage() {
               active.includes(k) ? TONE[k] + " bg-secondary/60" : "border-border text-muted-foreground",
             )}
           >
-            {k}
+            {k} <span className="num opacity-70">{counts[k] ?? 0}</span>
           </button>
         ))}
+        <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="size-2 animate-pulse rounded-full bg-bull" />
+          live · {events.length} events
+          {lastTs ? ` · last ${agoLabel(lastTs, now)}` : ""}
+        </span>
       </div>
 
-      <Panel title="Live market log" subtitle="Everything CoTraders detects, newest first">
+      <Panel title="Live market log" subtitle="Spoofing, whale walls, sweeps, prints, signals and news — newest first">
+
         <div className="max-h-[70vh] space-y-1.5 overflow-auto scroll-lock">
           {shown.map((e) => (
             <div key={e.id} className={cn("rounded-lg border bg-secondary/30 px-3 py-2", TONE[e.kind])}>
