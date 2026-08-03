@@ -93,7 +93,7 @@ async function fetchFeed(
 
   try {
     const res = await fetch(
-      `https://api.rss2json.com/v1/api.json?count=20&rss_url=${encodeURIComponent(url)}&_=${Date.now()}`,
+      `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}&_=${Date.now()}`,
       { signal, cache: "no-store" },
     );
     if (res.ok) {
