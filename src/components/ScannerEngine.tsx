@@ -349,29 +349,73 @@ export function SignalCard({ signal, horizon }: { signal: ScanResult; horizon: s
   );
 }
 
-export function exportSignalCsv(signal: ScanResult) {
-  const rows = [
-    ["symbol", "bias", "interval", "entry", "stop", "tp1", "tp2", "tp3", "probability", "rr", "generated"],
-    [
-      signal.symbol,
-      signal.bias,
-      signal.interval,
-      signal.entry,
-      signal.stop,
-      ...signal.targets,
-      signal.probability,
-      signal.rr.toFixed(2),
-      new Date(signal.createdAt).toISOString(),
-    ],
-    [],
-    ["confluence", "bias", "weight", "detail"],
-    ...signal.confluence.map((c) => [c.label, c.bias, c.weight.toFixed(1), c.detail]),
-  ];
-  const csv = rows.map((r) => r.join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+function download(name: string, mime: string, body: string) {
+  const url = URL.createObjectURL(new Blob([body], { type: mime }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `cotraders-${signal.symbol}-${signal.interval}.csv`;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(url);
 }
+
+const csvCell = (v: unknown) => {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const stamp = (t: number) => new Date(t).toISOString();
+
+/** Flat export record: probability, TP/SL zones and scan timestamps. */
+export function exportRows(signals: ScanResult[], scannedAt: number) {
+  return signals.map((s) => ({
+    symbol: s.symbol,
+    bias: s.bias,
+    interval: s.interval,
+    probability: s.probability,
+    rr: Number(s.rr.toFixed(2)),
+    entry: s.entry,
+    stop: s.stop,
+    slZoneLow: Math.min(s.entry, s.stop),
+    slZoneHigh: Math.max(s.entry, s.stop),
+    tp1: s.targets[0] ?? null,
+    tp2: s.targets[1] ?? null,
+    tp3: s.targets[2] ?? null,
+    tpZoneLow: Math.min(s.entry, ...s.targets),
+    tpZoneHigh: Math.max(s.entry, ...s.targets),
+    hawkes: s.quant?.hawkes ?? null,
+    bayes: s.quant?.bayes ?? null,
+    kelly: s.quant?.kelly ?? null,
+    conformalBand: s.quant?.band ?? null,
+    signalCreatedAt: stamp(s.createdAt),
+    scanCompletedAt: stamp(scannedAt),
+    exportedAt: stamp(Date.now()),
+    confluence: s.confluence.map((c) => `${c.label} (${c.bias} ${c.weight.toFixed(1)}): ${c.detail}`).join(" | "),
+  }));
+}
+
+export function exportScanCsv(signals: ScanResult[], scannedAt: number, key = "scan") {
+  const rows = exportRows(signals, scannedAt);
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(","),
+    ...rows.map((r) => headers.map((h) => csvCell((r as Record<string, unknown>)[h])).join(",")),
+  ].join("\n");
+  download(`cotraders-${key}-${scannedAt}.csv`, "text/csv;charset=utf-8", csv);
+}
+
+export function exportScanJson(signals: ScanResult[], scannedAt: number, key = "scan") {
+  const payload = {
+    scanner: key,
+    scanCompletedAt: stamp(scannedAt),
+    exportedAt: stamp(Date.now()),
+    count: signals.length,
+    results: exportRows(signals, scannedAt),
+  };
+  download(`cotraders-${key}-${scannedAt}.json`, "application/json", JSON.stringify(payload, null, 2));
+}
+
+export function exportSignalCsv(signal: ScanResult) {
+  exportScanCsv([signal], signal.createdAt, `${signal.symbol}-${signal.interval}`);
+}
+
