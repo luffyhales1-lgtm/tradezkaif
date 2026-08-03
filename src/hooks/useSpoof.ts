@@ -79,7 +79,9 @@ export function useSpoofRadar(
               status: "tracking",
               confidence: 0,
               cancelledUsd: 0,
+              risk: 0,
             });
+
           }
         });
     };
