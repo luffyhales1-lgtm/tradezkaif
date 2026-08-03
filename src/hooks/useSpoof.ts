@@ -20,6 +20,8 @@ export type WallTrack = {
   cancelledUsd: number;
   /** Live 0-100 spoof risk while the wall is still being watched. */
   risk: number;
+  flagged?: boolean;
+
 };
 
 export const CONFIRM_MS = 30_000;
