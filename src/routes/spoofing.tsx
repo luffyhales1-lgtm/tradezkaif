@@ -134,15 +134,29 @@ function Spoofing() {
                     <span className="font-semibold uppercase">
                       {c.status === "spoof" ? "SPOOF" : c.status === "real" ? "REAL WALL" : "FILLED"}
                     </span>
+                    {c.status !== "filled" && (
+                      <span
+                        className={cn(
+                          "num rounded border px-1.5 py-0.5 font-bold",
+                          c.confidence >= HIGH_RISK
+                            ? "border-bear/60 bg-bear/15 text-bear"
+                            : "border-border text-muted-foreground",
+                        )}
+                      >
+                        {c.confidence}/100
+                      </span>
+                    )}
                     <span className="num">{fmtPrice(c.price)}</span>
                     <span className="num">{fmtUsd(c.peakUsd)}</span>
                   </div>
                   {c.status === "spoof" && (
                     <p className="mt-1 text-muted-foreground">
-                      {c.confidence}/100 confidence · {fmtUsd(c.cancelledUsd)} cancelled ·{" "}
+                      {c.confidence >= HIGH_RISK ? "HIGH CONFIDENCE · " : ""}
+                      {fmtUsd(c.cancelledUsd)} cancelled ·{" "}
                       {c.side === "bid" ? "fake bid support" : "fake ask resistance"}
                     </p>
                   )}
+
                 </div>
               ))}
               {!confirmed.length && (
