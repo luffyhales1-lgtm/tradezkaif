@@ -18,9 +18,22 @@ export type WallTrack = {
   status: "tracking" | "spoof" | "real" | "filled";
   confidence: number;
   cancelledUsd: number;
+  /** Live 0-100 spoof risk while the wall is still being watched. */
+  risk: number;
 };
 
 export const CONFIRM_MS = 30_000;
+export const HIGH_RISK = 70;
+
+/** Live spoof-risk score for a wall that has not finished its 30s window. */
+function liveRisk(t: WallTrack, price: number, minUsd: number, now: number) {
+  const shrink = t.peakUsd > 0 ? 1 - t.usd / t.peakUsd : 0; // wall being pulled down
+  const size = Math.min(1, t.peakUsd / (minUsd * 4)); // oversized = attention grabbing
+  const dist = price > 0 ? Math.min(1, (Math.abs(t.price - price) / price) * 120) : 0;
+  const age = Math.min(1, (now - t.firstSeen) / CONFIRM_MS);
+  return Math.round(Math.min(99, shrink * 55 + size * 22 + dist * 15 + age * 8));
+}
+
 
 export function useSpoofRadar(
   symbol: string,
