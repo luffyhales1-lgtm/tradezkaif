@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SymbolPicker } from "@/components/SymbolPicker";
 import { Highlighted, Panel, Pill, Stat } from "@/components/ui-bits";
-import { useBook, useLocalState, useMarkPrice, useSymbolState } from "@/hooks/useMarket";
-import { CONFIRM_MS, useCountdown, useSpoofRadar } from "@/hooks/useSpoof";
+import { useBook, useLocalState, useMarkPrice, useNow, useSymbolState } from "@/hooks/useMarket";
+import { CONFIRM_MS, HIGH_RISK, useCountdown, useSpoofRadar } from "@/hooks/useSpoof";
 import { fmtPrice, fmtUsd } from "@/lib/binance";
 import { cn } from "@/lib/utils";
+
 
 export const Route = createFileRoute("/spoofing")({
   head: () => ({
