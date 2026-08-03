@@ -42,7 +42,7 @@ function Liquidity() {
   // Incremental map: the heavy pivot/zone scan only re-runs when a candle
   // actually closes. Live ticks reuse the cached zones and only re-filter.
   const barKey = candles.length ? `${candles.length}:${candles[candles.length - 1].t}` : "";
-  const cache = useRef<{ key: string; zones: ReturnType<typeof liquidityZones> }>({
+  const cache = useRef<{ key: string; zones: Zone[] }>({
     key: "",
     zones: [],
   });
