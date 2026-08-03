@@ -277,11 +277,35 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         </Panel>
       )}
 
+      {scannedAt && results.length > 0 && (
+        <Panel
+          title="Export scan report"
+          subtitle={`${results.length} setups · probability, TP/SL zones and scan timestamps · scanned ${new Date(scannedAt).toLocaleTimeString()}`}
+          right={
+            <div className="flex gap-2">
+              <button
+                onClick={() => exportScanCsv(results, scannedAt, config.key)}
+                className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary"
+              >
+                Export CSV
+              </button>
+              <button
+                onClick={() => exportScanJson(results, scannedAt, config.key)}
+                className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent"
+              >
+                Export JSON
+              </button>
+            </div>
+          }
+        />
+      )}
+
       <div className="grid gap-3 lg:grid-cols-2">
         {results.map((s) => (
           <SignalCard key={s.symbol} signal={s} horizon={config.horizon} />
         ))}
       </div>
+
     </div>
   );
 }
