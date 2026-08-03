@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { SymbolPicker } from "@/components/SymbolPicker";
 import { Highlighted, Panel, Pill, Stat } from "@/components/ui-bits";
 import { useBook, useCandles, useLocalState, useMarkPrice, useSymbolState } from "@/hooks/useMarket";
-import { bookAnalysis, liquidityZones } from "@/lib/analysis";
+import { bookAnalysis, liquidityZones, type Zone } from "@/lib/analysis";
+
 import { fmtPrice, fmtUsd } from "@/lib/binance";
 import { cn } from "@/lib/utils";
 
