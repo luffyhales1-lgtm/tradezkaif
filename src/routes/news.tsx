@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel, Pill } from "@/components/ui-bits";
-import { agoLabel } from "@/lib/bus";
+import { agoLabel, pushLog } from "@/lib/bus";
 import { useNow } from "@/hooks/useMarket";
 import { cn } from "@/lib/utils";
 
@@ -29,15 +29,18 @@ type Item = {
 };
 
 const FEEDS: { url: string; source: string; category: Item["category"] }[] = [
-  { url: "https://www.coindesk.com/arc/outboundfeeds/rss/", source: "CoinDesk", category: "crypto" },
   { url: "https://cointelegraph.com/rss", source: "Cointelegraph", category: "crypto" },
-  { url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", source: "WSJ Markets", category: "stocks" },
+  { url: "https://www.newsbtc.com/feed/", source: "NewsBTC", category: "crypto" },
+  { url: "https://cryptopotato.com/feed/", source: "CryptoPotato", category: "crypto" },
+  { url: "https://bitcoinist.com/feed/", source: "Bitcoinist", category: "crypto" },
   { url: "https://www.fxstreet.com/rss/news", source: "FXStreet", category: "forex" },
-  { url: "https://finance.yahoo.com/news/rssindex", source: "Yahoo Finance", category: "macro" },
+  { url: "https://www.investing.com/rss/news_25.rss", source: "Investing FX", category: "forex" },
+  { url: "https://finance.yahoo.com/news/rssindex", source: "Yahoo Finance", category: "stocks" },
+  { url: "https://www.investing.com/rss/news_14.rss", source: "Investing Economy", category: "macro" },
 ];
 
-const POSITIVE = ["surge", "rally", "soar", "gain", "jump", "record", "approval", "bullish", "beat", "inflow", "upgrade", "cut"];
-const NEGATIVE = ["crash", "plunge", "fall", "drop", "slump", "hack", "ban", "lawsuit", "bearish", "miss", "outflow", "selloff", "liquidat", "hike"];
+const POSITIVE = ["surge", "rally", "soar", "gain", "jump", "record", "approval", "bullish", "beat", "inflow", "upgrade", "cut", "adopt", "breakout", "high"];
+const NEGATIVE = ["crash", "plunge", "fall", "drop", "slump", "hack", "ban", "lawsuit", "bearish", "miss", "outflow", "selloff", "liquidat", "hike", "exploit", "warn", "low"];
 
 function sentiment(title: string) {
   const t = title.toLowerCase();
@@ -74,22 +77,62 @@ function romanUrdu(item: Item) {
   return `${item.source} se khabar: "${item.title}". ${impact}`;
 }
 
-async function fetchFeed(url: string, source: string, category: Item["category"]): Promise<Item[]> {
-  const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-  const res = await fetch(proxy);
+type Rss2JsonItem = { title?: string; link?: string; pubDate?: string };
+
+/** Primary: rss2json (CORS-enabled JSON). Fallback: raw XML through a proxy. */
+async function fetchFeed(
+  url: string,
+  source: string,
+  category: Item["category"],
+  signal: AbortSignal,
+): Promise<Item[]> {
+  const toTs = (d?: string) => {
+    const parsed = d ? Date.parse(d.includes("T") ? d : d.replace(" ", "T") + "Z") : NaN;
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  };
+
+  try {
+    const res = await fetch(
+      `https://api.rss2json.com/v1/api.json?count=20&rss_url=${encodeURIComponent(url)}&_=${Date.now()}`,
+      { signal, cache: "no-store" },
+    );
+    if (res.ok) {
+      const json = (await res.json()) as { status?: string; items?: Rss2JsonItem[] };
+      if (json.status === "ok" && json.items?.length) {
+        return json.items.map((n) => ({
+          title: (n.title ?? "").trim(),
+          link: n.link ?? "#",
+          ts: toTs(n.pubDate),
+          source,
+          category,
+        }));
+      }
+    }
+  } catch {
+    /* fall through to proxy */
+  }
+
+  const res = await fetch(
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(`${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}`)}`,
+    { signal, cache: "no-store" },
+  );
   if (!res.ok) throw new Error(`${source} ${res.status}`);
   const xml = await res.text();
   const doc = new DOMParser().parseFromString(xml, "text/xml");
-  return [...doc.querySelectorAll("item, entry")].slice(0, 15).map((n) => {
-    const title = n.querySelector("title")?.textContent?.trim() ?? "";
+  return [...doc.querySelectorAll("item, entry")].slice(0, 20).map((n) => {
     const linkEl = n.querySelector("link");
-    const link = linkEl?.textContent?.trim() || linkEl?.getAttribute("href") || "#";
-    const dateText =
-      n.querySelector("pubDate")?.textContent ??
-      n.querySelector("updated")?.textContent ??
-      n.querySelector("published")?.textContent ??
-      "";
-    return { title, link, ts: dateText ? Date.parse(dateText) : Date.now(), source, category };
+    return {
+      title: n.querySelector("title")?.textContent?.trim() ?? "",
+      link: linkEl?.textContent?.trim() || linkEl?.getAttribute("href") || "#",
+      ts: toTs(
+        n.querySelector("pubDate")?.textContent ??
+          n.querySelector("updated")?.textContent ??
+          n.querySelector("published")?.textContent ??
+          undefined,
+      ),
+      source,
+      category,
+    };
   });
 }
 
@@ -98,31 +141,62 @@ function News() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | Item["category"]>("all");
   const [errors, setErrors] = useState<string[]>([]);
-  const now = useNow(5000);
-
-  const load = async () => {
-    setLoading(true);
-    const results = await Promise.allSettled(FEEDS.map((f) => fetchFeed(f.url, f.source, f.category)));
-    const ok = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
-    setErrors(
-      results
-        .map((r, i) => (r.status === "rejected" ? FEEDS[i].source : null))
-        .filter((x): x is string => Boolean(x)),
-    );
-    setItems(ok.filter((i) => i.title).sort((a, b) => b.ts - a.ts).slice(0, 80));
-    setLoading(false);
-  };
+  const [lastSync, setLastSync] = useState(0);
+  const seen = useRef(new Set<string>());
+  const now = useNow(1000);
 
   useEffect(() => {
+    const ctrl = new AbortController();
+    let alive = true;
+
+    const load = async () => {
+      const results = await Promise.allSettled(
+        FEEDS.map((f) => fetchFeed(f.url, f.source, f.category, ctrl.signal)),
+      );
+      if (!alive) return;
+      const ok = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+      setErrors(
+        results
+          .map((r, i) => (r.status === "rejected" ? FEEDS[i].source : null))
+          .filter((x): x is string => Boolean(x)),
+      );
+      const merged = new Map<string, Item>();
+      ok.filter((i) => i.title).forEach((i) => merged.set(i.title, i));
+      const list = [...merged.values()].sort((a, b) => b.ts - a.ts).slice(0, 120);
+      setItems(list);
+      setLastSync(Date.now());
+      setLoading(false);
+
+      // Stream fresh headlines into the Live Log.
+      list.slice(0, 12).forEach((i) => {
+        if (seen.current.has(i.title) || Date.now() - i.ts > 30 * 60_000) return;
+        seen.current.add(i.title);
+        const s = sentiment(i.title);
+        pushLog({
+          kind: "alert",
+          symbol: i.category.toUpperCase(),
+          text: `${s === "positive" ? "BULLISH" : s === "negative" ? "BEARISH" : "NEUTRAL"} NEWS · ${i.title}`,
+          meta: `${i.source} · ${romanUrdu(i).split(". ").slice(1).join(". ")}`,
+          ts: i.ts,
+        });
+      });
+      if (seen.current.size > 600) seen.current.clear();
+    };
+
     void load();
-    const id = setInterval(load, 120_000);
-    return () => clearInterval(id);
+    const id = setInterval(() => void load(), 45_000);
+    return () => {
+      alive = false;
+      ctrl.abort();
+      clearInterval(id);
+    };
   }, []);
 
   const shown = useMemo(
     () => (filter === "all" ? items : items.filter((i) => i.category === filter)),
     [items, filter],
   );
+  const freshest = items[0]?.ts ?? 0;
 
   return (
     <div className="space-y-4">
@@ -141,12 +215,15 @@ function News() {
             </button>
           ))}
         </div>
-        <button
-          onClick={load}
-          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
-        >
-          {loading ? "Refreshing…" : "Refresh feed"}
-        </button>
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className={cn("size-2 rounded-full", loading ? "bg-warn" : "bg-bull animate-pulse")} />
+            {loading ? "syncing…" : "live"}
+          </span>
+          {!!lastSync && <span className="num">synced {agoLabel(lastSync, now)}</span>}
+          {!!freshest && <span className="num">newest {agoLabel(freshest, now)}</span>}
+          <span className="num">auto-refresh 45s</span>
+        </div>
       </div>
 
       {errors.length > 0 && (
@@ -158,6 +235,7 @@ function News() {
       <div className="grid gap-3 lg:grid-cols-2">
         {shown.map((item, i) => {
           const s = sentiment(item.title);
+          const fresh = now - item.ts < 15 * 60_000;
           return (
             <Panel key={`${item.link}-${i}`}>
               <div className="mb-2 flex items-center gap-2">
@@ -165,6 +243,7 @@ function News() {
                   {s === "positive" ? "market positive" : s === "negative" ? "market negative" : "neutral"}
                 </Pill>
                 <Pill>{item.category}</Pill>
+                {fresh && <Pill tone="primary">new</Pill>}
                 <span className="ml-auto text-[11px] text-muted-foreground">{agoLabel(item.ts, now)}</span>
               </div>
               <a href={item.link} target="_blank" rel="noreferrer" className="text-sm font-medium hover:text-primary">
