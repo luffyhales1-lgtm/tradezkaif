@@ -26,16 +26,18 @@ function Spoofing() {
   const { symbol, setSymbol } = useSymbolState();
   const book = useBook(symbol);
   const price = useMarkPrice(symbol);
-  const [minUsd, setMinUsd] = useLocalState("cotraders.spoof.min", 1_000_000);
+  const [minUsd, setMinUsd] = useLocalState("cotraders.spoof.min2", 250_000);
   const { tracking, confirmed, spoofPct } = useSpoofRadar(symbol, book, price, minUsd);
   const left = useCountdown(CONFIRM_MS / 1000);
+  const now = useNow(500);
+  const highRisk = tracking.filter((t) => t.risk >= HIGH_RISK);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SymbolPicker symbol={symbol} setSymbol={setSymbol} showInterval={false} />
         <div className="flex items-center gap-2">
-          {[500_000, 1_000_000, 2_000_000, 5_000_000].map((v) => (
+          {[100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000].map((v) => (
             <button
               key={v}
               onClick={() => setMinUsd(v)}
@@ -53,41 +55,65 @@ function Spoofing() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <Stat label="Spoof ratio" value={`${spoofPct}%`} tone={spoofPct > 50 ? "bear" : "bull"} hint="of confirmed walls" />
         <Stat label="Tracking" value={tracking.length} hint="walls under 30s watch" />
+        <Stat
+          label={`Risk ≥ ${HIGH_RISK}`}
+          value={highRisk.length}
+          tone={highRisk.length ? "bear" : "bull"}
+          hint="live spoof suspects"
+        />
         <Stat label="Confirmed events" value={confirmed.length} />
         <Stat label="Mark" value={price ? fmtPrice(price) : "—"} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Radar · tracking" subtitle="Each wall needs 30s before it is judged">
+        <Panel
+          title="Radar · tracking"
+          subtitle={`Each wall needs 30s before it is judged · flagged above ${HIGH_RISK}/100`}
+        >
           <div className="max-h-[460px] space-y-1.5 overflow-auto scroll-lock">
             {tracking.map((t) => {
-              const age = Math.min(CONFIRM_MS, Date.now() - t.firstSeen);
+              const age = Math.min(CONFIRM_MS, now - t.firstSeen);
+              const hot = t.risk >= HIGH_RISK;
               return (
-                <div key={t.id} className="rounded-lg border border-border p-2.5">
+                <div
+                  key={t.id}
+                  className={cn(
+                    "rounded-lg border p-2.5",
+                    hot ? "border-bear/60 bg-bear/10" : "border-border",
+                  )}
+                >
                   <div className="flex items-center justify-between text-xs">
                     <Pill tone={t.side === "bid" ? "bull" : "bear"}>{t.side}</Pill>
                     <span className="num">{fmtPrice(t.price)}</span>
                     <span className="num font-semibold">{fmtUsd(t.usd)}</span>
+                    <span className={cn("num font-bold", hot ? "text-bear" : "text-muted-foreground")}>
+                      {t.risk}/100
+                    </span>
                   </div>
                   <div className="mt-1.5 h-1 overflow-hidden rounded bg-secondary">
                     <div
-                      className="h-full bg-primary"
+                      className={cn("h-full", hot ? "bg-bear" : "bg-primary")}
                       style={{ width: `${(age / CONFIRM_MS) * 100}%` }}
                     />
                   </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Peak {fmtUsd(t.peakUsd)} · {Math.round(age / 1000)}s watched
+                    {hot ? " · SPOOF SUSPECT — size being pulled" : ""}
+                  </p>
                 </div>
               );
             })}
             {!tracking.length && (
               <p className="py-8 text-center text-xs text-muted-foreground">
-                No walls above {fmtUsd(minUsd)} yet — radar is live.
+                No walls above {fmtUsd(minUsd)} yet — radar is live, lower the size filter to catch more.
               </p>
             )}
           </div>
         </Panel>
+
 
         <Panel title="Confirmed after 30s" subtitle="Spoof = pulled before price arrived">
           <Highlighted title="Highlighted spoof zones">
