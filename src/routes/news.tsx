@@ -137,13 +137,18 @@ async function fetchFeed(
   });
 }
 
+const MAX_AGE_MS = 24 * 60 * 60_000;
+const keyOf = (i: Item) => `${i.link}|${i.title.toLowerCase().replace(/\W+/g, " ").trim()}`;
+
 function News() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | Item["category"]>("all");
   const [errors, setErrors] = useState<string[]>([]);
   const [lastSync, setLastSync] = useState(0);
+  const [freshCount, setFreshCount] = useState(0);
   const seen = useRef(new Set<string>());
+  const known = useRef(new Map<string, Item>());
   const now = useNow(1000);
 
   useEffect(() => {
@@ -161,35 +166,56 @@ function News() {
           .map((r, i) => (r.status === "rejected" ? FEEDS[i].source : null))
           .filter((x): x is string => Boolean(x)),
       );
-      const merged = new Map<string, Item>();
-      ok.filter((i) => i.title).forEach((i) => merged.set(i.title, i));
-      const list = [...merged.values()].sort((a, b) => b.ts - a.ts).slice(0, 120);
+
+      // Incremental merge: only genuinely new keys are added, nothing older
+      // than 24h survives, and the newest item is always on top.
+      const cutoff = Date.now() - MAX_AGE_MS;
+      const arrivals: Item[] = [];
+      ok.filter((i) => i.title && i.ts >= cutoff).forEach((i) => {
+        const k = keyOf(i);
+        if (known.current.has(k)) return;
+        known.current.set(k, i);
+        arrivals.push(i);
+      });
+      [...known.current.entries()].forEach(([k, i]) => {
+        if (i.ts < cutoff) known.current.delete(k);
+      });
+
+      const list = [...known.current.values()].sort((a, b) => b.ts - a.ts).slice(0, 150);
       setItems(list);
+      setFreshCount(arrivals.length);
       setLastSync(Date.now());
       setLoading(false);
 
-      // Stream fresh headlines into the Live Log.
-      list.slice(0, 12).forEach((i) => {
-        if (seen.current.has(i.title) || Date.now() - i.ts > 30 * 60_000) return;
-        seen.current.add(i.title);
-        const s = sentiment(i.title);
-        pushLog({
-          kind: "alert",
-          symbol: i.category.toUpperCase(),
-          text: `${s === "positive" ? "BULLISH" : s === "negative" ? "BEARISH" : "NEUTRAL"} NEWS · ${i.title}`,
-          meta: `${i.source} · ${romanUrdu(i).split(". ").slice(1).join(". ")}`,
-          ts: i.ts,
+      // Stream only brand-new headlines into the Live Log.
+      arrivals
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, 10)
+        .forEach((i) => {
+          const k = keyOf(i);
+          if (seen.current.has(k) || Date.now() - i.ts > 60 * 60_000) return;
+          seen.current.add(k);
+          const s = sentiment(i.title);
+          pushLog({
+            kind: "alert",
+            symbol: i.category.toUpperCase(),
+            text: `${s === "positive" ? "BULLISH" : s === "negative" ? "BEARISH" : "NEUTRAL"} NEWS · ${i.title}`,
+            meta: `${i.source} · ${romanUrdu(i).split(". ").slice(1).join(". ")}`,
+            ts: i.ts,
+          });
         });
-      });
-      if (seen.current.size > 600) seen.current.clear();
+      if (seen.current.size > 800) seen.current.clear();
     };
 
     void load();
-    const id = setInterval(() => void load(), 45_000);
+    const id = setInterval(() => void load(), 20_000);
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
     return () => {
       alive = false;
       ctrl.abort();
       clearInterval(id);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -198,6 +224,7 @@ function News() {
     [items, filter],
   );
   const freshest = items[0]?.ts ?? 0;
+
 
   return (
     <div className="space-y-4">
