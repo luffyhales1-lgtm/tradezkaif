@@ -116,16 +116,18 @@ export function useSpoofRadar(
           const dist = Math.abs(t.price - price) / (price || 1);
           t.status = "spoof";
           t.cancelledUsd = t.peakUsd;
-          // Fully cancelled, never-touched walls score in the high 90s.
+          // Calibrated so a textbook spoof — full cancellation, price never
+          // reached it, oversized wall, survived the whole window — lands at
+          // 96–99/100, while marginal cases stay in the 70s/80s.
+          const cancelled = t.peakUsd > 0 ? Math.min(1, t.cancelledUsd / t.peakUsd) : 1;
+          const size = Math.min(1, t.peakUsd / (minUsd * 2));
+          const away = Math.min(1, dist * 500);
+          const survived = Math.min(1, age / CONFIRM_MS);
           t.confidence = Math.min(
             99,
-            Math.round(
-              72 +
-                Math.min(14, (t.peakUsd / minUsd) * 7) +
-                Math.min(8, dist * 800) +
-                Math.min(5, (age / CONFIRM_MS) * 5),
-            ),
+            Math.round(60 + cancelled * 22 + size * 8 + away * 6 + survived * 4),
           );
+
           newlyConfirmed.push({ ...t });
           pushLog({
             kind: "spoof",
