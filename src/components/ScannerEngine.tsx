@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchKlines, fetchTopSymbols, fmtPrice, type Interval } from "@/lib/binance";
+import { fetchKlines, fetchTopSymbols, fmtPrice, type Candle, type Interval } from "@/lib/binance";
 import { analyze, type Signal } from "@/lib/analysis";
 import {
   conformalBand,
@@ -14,6 +14,24 @@ import { Panel, Pill, Stat } from "@/components/ui-bits";
 import { INTERVALS } from "@/lib/binance";
 import { cn } from "@/lib/utils";
 
+/** Pluggable market source so the same engine can scan crypto or forex. */
+export type ScanSource = {
+  label: string;
+  universeLabel: string;
+  intervals: readonly Interval[];
+  list: (limit: number) => Promise<string[]>;
+  candles: (symbol: string, interval: Interval, limit: number) => Promise<Candle[]>;
+  format?: (n: number) => string;
+};
+
+export const binanceSource: ScanSource = {
+  label: "Binance USDⓈ-M",
+  universeLabel: "Binance high-volume USDⓈ-M",
+  intervals: INTERVALS,
+  list: async (limit) => (await fetchTopSymbols(limit)).map((t) => t.symbol),
+  candles: (symbol, interval, limit) => fetchKlines(symbol, interval, limit),
+};
+
 export type ScannerConfig = {
   key: string;
   title: string;
@@ -25,6 +43,7 @@ export type ScannerConfig = {
   minProbability: number;
   horizon: string;
   useQuant?: boolean;
+  source?: ScanSource;
 };
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>) {
@@ -44,9 +63,46 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
   return out;
 }
 
+export const TF_MINUTES: Record<string, number> = {
+  "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+  "1h": 60, "2h": 120, "4h": 240, "6h": 360, "12h": 720, "1d": 1440,
+};
+
+/** Higher timeframe used to confirm the primary signal. */
+export function htfOf(interval: Interval): Interval {
+  const map: Record<string, Interval> = {
+    "1m": "15m", "3m": "30m", "5m": "1h", "15m": "4h", "30m": "4h",
+    "1h": "4h", "2h": "1d", "4h": "1d", "6h": "1d", "12h": "1d", "1d": "1d",
+  };
+  return map[interval] ?? "4h";
+}
+
+/** Average true range per bar — drives the "trade completes in" estimate. */
+function avgRange(candles: Candle[], n = 30) {
+  const tail = candles.slice(-n);
+  if (!tail.length) return 0;
+  return tail.reduce((a, c) => a + (c.h - c.l), 0) / tail.length;
+}
+
+/** Expected minutes for price to travel from entry to the first target. */
+export function targetEta(candles: Candle[], interval: Interval, entry: number, tp: number) {
+  const r = avgRange(candles);
+  if (!r) return null;
+  const bars = Math.max(1, Math.abs(tp - entry) / (r * 0.62));
+  return Math.round(bars * (TF_MINUTES[interval] ?? 60));
+}
+
+export const etaLabel = (min: number) =>
+  min < 60 ? `${min}m` : min < 1440 ? `${Math.round(min / 6) / 10}h` : `${(min / 1440).toFixed(1)}d`;
+
 export type ScanResult = Signal & {
   quant?: { hawkes: number; kelly: number; band: string; bayes: number };
+  htf?: { interval: Interval; bias: Signal["bias"]; agrees: boolean };
+  etaMin?: number;
+  completeBy?: number;
+  grade?: "A+" | "A" | "B";
 };
+
 
 export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [interval, setIntervalTf] = useState<Interval>(config.defaultInterval);
