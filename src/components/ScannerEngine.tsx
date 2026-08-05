@@ -141,15 +141,17 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
     }, 250);
 
     try {
-      const tickers = await fetchTopSymbols(config.universe);
-      const symbols = tickers.map((t) => t.symbol);
+      const src = config.source ?? binanceSource;
+      const symbols = await src.list(config.universe);
       const depth = turbo ? 200 : 300;
+      const fmt = src.format ?? fmtPrice;
       let done = 0;
+      // Pass 1 — score the whole universe on the primary timeframe.
       const scored = await mapLimit(symbols, turbo ? 24 : 14, async (symbol) => {
-        const candles = await fetchKlines(symbol, interval, depth);
+        const candles = await src.candles(symbol, interval, depth);
         done++;
         if (done % 4 === 0 || done === symbols.length) {
-          setProgress(Math.round((done / symbols.length) * 100));
+          setProgress(Math.round((done / symbols.length) * 90));
         }
         const a = analyze(symbol, candles, interval);
         const sig = a.signal;
@@ -176,11 +178,44 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
             Math.min(99, sig.probability * 0.6 + post * 40 + (tail < 0.02 ? 6 : 0)),
           );
         }
-        return { ...sig, quant } as ScanResult;
+        const etaMin = targetEta(candles, interval, sig.entry, sig.targets[0] ?? sig.entry);
+        return {
+          ...sig,
+          quant,
+          ...(etaMin ? { etaMin, completeBy: Date.now() + etaMin * 60_000 } : {}),
+        } as ScanResult;
       });
 
-      setProgress(100);
       setScannedCount(scored.length);
+
+      // Pass 2 — higher-timeframe confirmation on the shortlist only.
+      const shortlist = scored
+        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability - 8)
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, Math.max(config.results * 3, 12));
+
+      const htf = htfOf(interval);
+      const confirmed = await mapLimit(shortlist, 8, async (s) => {
+        try {
+          const hc = await src.candles(s.symbol, htf, 180);
+          const ha = analyze(s.symbol, hc, htf).signal;
+          const agrees = ha.bias === s.bias;
+          const neutral = ha.bias === "neutral";
+          const probability = Math.round(
+            Math.max(
+              1,
+              Math.min(99, s.probability + (agrees ? 7 : neutral ? 0 : -14)),
+            ),
+          );
+          const grade: ScanResult["grade"] =
+            agrees && probability >= 85 ? "A+" : agrees ? "A" : "B";
+          return { ...s, probability, htf: { interval: htf, bias: ha.bias, agrees }, grade };
+        } catch {
+          return s;
+        }
+      });
+      setProgress(100);
+
       const elapsed = Date.now() - started;
       // Turbo publishes the moment the maths is done instead of padding to the
       // advertised scan window.
@@ -189,8 +224,8 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       }
       if (abort.current) return;
 
-      const top = scored
-        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability)
+      const top = confirmed
+        .filter((s) => s.probability >= config.minProbability && s.htf?.agrees !== false)
         .sort((a, b) => b.probability - a.probability)
         .slice(0, config.results);
 
@@ -200,8 +235,10 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         pushLog({
           kind: "signal",
           symbol: s.symbol,
-          text: `${config.title}: ${s.bias.toUpperCase()} ${s.symbol} @ ${fmtPrice(s.entry)}`,
-          meta: `${s.probability}% confluence · SL ${fmtPrice(s.stop)} · TP1 ${fmtPrice(s.targets[0])}`,
+          text: `${config.title}: ${s.bias.toUpperCase()} ${s.symbol} @ ${fmt(s.entry)}`,
+          meta: `${s.probability}% confluence · SL ${fmt(s.stop)} · TP1 ${fmt(s.targets[0])}${
+            s.etaMin ? ` · TP expected in ~${etaLabel(s.etaMin)}` : ""
+          }`,
         }),
       );
     } catch (e) {
@@ -212,6 +249,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setLeft(config.durationMs / 1000);
     }
   }, [config, interval, running, turbo]);
+
 
   runRef.current = () => void run();
 
