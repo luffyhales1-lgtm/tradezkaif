@@ -33,6 +33,9 @@ function aggregate(candles: Candle[], fold: number): Candle[] {
       l: Math.min(...g.map((c) => c.l)),
       c: g[g.length - 1].c,
       v: g.reduce((a, c) => a + c.v, 0),
+      buyV: g.reduce((a, c) => a + c.buyV, 0),
+      trades: g.reduce((a, c) => a + c.trades, 0),
+      closed: g[g.length - 1].closed,
     });
   }
   return out;
@@ -86,6 +89,12 @@ export async function fetchFxCandles(symbol: string, interval: string, limit: nu
         c: Number(q.close?.[i] ?? NaN),
         // Spot FX has no real volume; range acts as an activity proxy.
         v: Number(q.volume?.[i] ?? 0) || Math.abs(Number(q.high?.[i] ?? 0) - Number(q.low?.[i] ?? 0)) * 1e6,
+        // Up-bar volume approximates aggressive buying for the delta model.
+        buyV:
+          (Number(q.volume?.[i] ?? 0) || Math.abs(Number(q.high?.[i] ?? 0) - Number(q.low?.[i] ?? 0)) * 1e6) *
+          (Number(q.close?.[i] ?? 0) >= Number(q.open?.[i] ?? 0) ? 0.62 : 0.38),
+        trades: 0,
+        closed: true,
       }))
       .filter((c) => Number.isFinite(c.o) && Number.isFinite(c.c) && Number.isFinite(c.h) && Number.isFinite(c.l));
     cache.set(key, { at: Date.now(), candles: base });
