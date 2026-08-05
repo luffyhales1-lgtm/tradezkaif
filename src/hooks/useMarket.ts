@@ -3,7 +3,7 @@ import {
   fetchDepth,
   fetchKlines,
   fetchTopSymbols,
-  openStream,
+  subscribe,
   type Book,
   type Candle,
   type Interval,
@@ -110,7 +110,7 @@ export function useCandles(symbol: string, interval: Interval, limit = 400) {
 
   useEffect(() => {
     const stream = `${symbol.toLowerCase()}@kline_${interval}`;
-    return openStream([stream], (_s, data) => {
+    return subscribe([stream], (_s, data) => {
       const k = data.k as Record<string, string | number | boolean>;
       const c: Candle = {
         t: Number(k.t),
@@ -200,7 +200,7 @@ export function useBook(symbol: string, depth = 500) {
     seed();
     const reseed = setInterval(seed, 20_000);
 
-    const close = openStream([`${symbol.toLowerCase()}@depth@500ms`], (_s, d) => {
+    const close = subscribe([`${symbol.toLowerCase()}@depth@500ms`], (_s, d) => {
       const [bids, asks] = ref.current;
       const apply = (m: Map<number, number>, rows: string[][]) => {
         rows.forEach(([p, q]) => {
@@ -234,7 +234,7 @@ export function useMarkPrice(symbol: string) {
   const [price, push] = useThrottledState<number>(0, 400);
   useEffect(
     () =>
-      openStream([`${symbol.toLowerCase()}@markPrice@1s`], (_s, d) => push(Number(d.p))),
+      subscribe([`${symbol.toLowerCase()}@markPrice@1s`], (_s, d) => push(Number(d.p))),
     [symbol, push],
   );
   return price;
