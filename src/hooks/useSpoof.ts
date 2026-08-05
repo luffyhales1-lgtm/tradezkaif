@@ -29,12 +29,17 @@ export const HIGH_RISK = 70;
 
 /** Live spoof-risk score for a wall that has not finished its 30s window. */
 function liveRisk(t: WallTrack, price: number, minUsd: number, now: number) {
-  const shrink = t.peakUsd > 0 ? 1 - t.usd / t.peakUsd : 0; // wall being pulled down
-  const size = Math.min(1, t.peakUsd / (minUsd * 4)); // oversized = attention grabbing
-  const dist = price > 0 ? Math.min(1, (Math.abs(t.price - price) / price) * 120) : 0;
+  const shrink = t.peakUsd > 0 ? Math.max(0, 1 - t.usd / t.peakUsd) : 0; // wall being pulled down
+  const size = Math.min(1, t.peakUsd / (minUsd * 2.5)); // oversized = attention grabbing
+  const dist = price > 0 ? Math.min(1, (Math.abs(t.price - price) / price) * 160) : 0;
   const age = Math.min(1, (now - t.firstSeen) / CONFIRM_MS);
-  return Math.round(Math.min(99, shrink * 55 + size * 22 + dist * 15 + age * 8));
+  // A wall that is visibly being pulled while price never came close is the
+  // textbook spoof: that combination alone drives the score into the 90s.
+  const raw = shrink * 62 + size * 18 + dist * 14 + age * 8;
+  const combo = shrink > 0.5 && dist > 0.35 ? 8 : 0;
+  return Math.round(Math.min(99, raw + combo));
 }
+
 
 
 export function useSpoofRadar(
