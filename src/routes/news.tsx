@@ -99,7 +99,7 @@ async function fetchFeed(
     if (res.ok) {
       const json = (await res.json()) as { status?: string; items?: Rss2JsonItem[] };
       if (json.status === "ok" && json.items?.length) {
-        return json.items.slice(0, 20).map((n) => ({
+        return json.items.slice(0, 25).map((n) => ({
           title: (n.title ?? "").trim(),
           link: n.link ?? "#",
           ts: toTs(n.pubDate),
@@ -250,7 +250,8 @@ function News() {
           </span>
           {!!lastSync && <span className="num">synced {agoLabel(lastSync, now)}</span>}
           {!!freshest && <span className="num">newest {agoLabel(freshest, now)}</span>}
-          <span className="num">auto-refresh 45s</span>
+          <span className="num">auto-refresh 20s</span>
+          {freshCount > 0 && <span className="num text-bull">+{freshCount} new</span>}
         </div>
       </div>
 
