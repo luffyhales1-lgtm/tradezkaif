@@ -289,7 +289,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       >
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Timeframe</span>
-          {INTERVALS.map((i) => (
+          {(config.source?.intervals ?? INTERVALS).map((i) => (
             <button
               key={i}
               onClick={() => setIntervalTf(i)}
@@ -341,7 +341,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         </div>
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Stat label="Universe" value={`${config.universe} coins`} hint="Binance high-volume USDⓈ-M" />
+          <Stat label="Universe" value={`${config.universe} ${config.source ? "instruments" : "coins"}`} hint={(config.source ?? binanceSource).universeLabel} />
           <Stat label="Analysed" value={scannedCount || "—"} hint="symbols this run" />
           <Stat label="Progress" value={`${progress}%`} />
           <Stat
@@ -402,7 +402,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
 
       <div className="grid gap-3 lg:grid-cols-2">
         {results.map((s) => (
-          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} />
+          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} fmt={config.source?.format} />
         ))}
       </div>
 
@@ -410,7 +410,15 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   );
 }
 
-export function SignalCard({ signal, horizon }: { signal: ScanResult; horizon: string }) {
+export function SignalCard({
+  signal,
+  horizon,
+  fmt = fmtPrice,
+}: {
+  signal: ScanResult;
+  horizon: string;
+  fmt?: (n: number) => string;
+}) {
   const long = signal.bias === "long";
   return (
     <article className="panel p-4">
@@ -421,19 +429,33 @@ export function SignalCard({ signal, horizon }: { signal: ScanResult; horizon: s
             <Pill tone={long ? "bull" : "bear"}>{signal.bias}</Pill>
             <Pill tone="primary">{signal.probability}% confluence</Pill>
             <Pill>{signal.interval}</Pill>
+            {signal.grade && <Pill tone={signal.grade === "B" ? "warn" : "bull"}>{signal.grade} grade</Pill>}
+            {signal.htf && (
+              <Pill tone={signal.htf.agrees ? "bull" : "warn"}>
+                {signal.htf.interval} {signal.htf.agrees ? "aligned" : signal.htf.bias}
+              </Pill>
+            )}
           </div>
         </div>
         <div className="text-right">
           <div className="text-[10px] uppercase text-muted-foreground">Target window</div>
           <div className="num text-sm">{horizon}</div>
+          {signal.etaMin && (
+            <div className="num pt-1 text-[11px] text-primary">
+              TP1 in ~{etaLabel(signal.etaMin)}
+              {signal.completeBy
+                ? ` · by ${new Date(signal.completeBy).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : ""}
+            </div>
+          )}
         </div>
       </header>
 
       <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
-        <Stat label="Entry" value={fmtPrice(signal.entry)} />
-        <Stat label="Stop" value={fmtPrice(signal.stop)} tone="bear" />
+        <Stat label="Entry" value={fmt(signal.entry)} />
+        <Stat label="Stop" value={fmt(signal.stop)} tone="bear" />
         {signal.targets.map((t, i) => (
-          <Stat key={i} label={`TP${i + 1}`} value={fmtPrice(t)} tone="bull" />
+          <Stat key={i} label={`TP${i + 1}`} value={fmt(t)} tone="bull" />
         ))}
       </div>
 
