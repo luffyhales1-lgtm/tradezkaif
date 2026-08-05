@@ -16,6 +16,7 @@ export const NAV = [
   { to: "/swing", label: "Swing Scanner" },
   { to: "/scalping", label: "Scalp Scanner" },
   { to: "/ultimate", label: "Ultimate Scanner" },
+  { to: "/forex", label: "Forex Scanner" },
   { to: "/math", label: "Math Scanner" },
   { to: "/structure", label: "S/R Zones" },
   { to: "/whale", label: "Whale Tracker" },
