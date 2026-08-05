@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as FibRouteImport } from './routes/fib'
 import { Route as FootprintRouteImport } from './routes/footprint'
+import { Route as ForexRouteImport } from './routes/forex'
 import { Route as LiquidityRouteImport } from './routes/liquidity'
 import { Route as LogRouteImport } from './routes/log'
 import { Route as MathRouteImport } from './routes/math'
@@ -44,6 +45,11 @@ const FibRoute = FibRouteImport.update({
 const FootprintRoute = FootprintRouteImport.update({
   id: '/footprint',
   path: '/footprint',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForexRoute = ForexRouteImport.update({
+  id: '/forex',
+  path: '/forex',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiquidityRoute = LiquidityRouteImport.update({
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
+  '/forex': typeof ForexRoute
   '/liquidity': typeof LiquidityRoute
   '/log': typeof LogRoute
   '/math': typeof MathRoute
@@ -130,6 +137,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
+  '/forex': typeof ForexRoute
   '/liquidity': typeof LiquidityRoute
   '/log': typeof LogRoute
   '/math': typeof MathRoute
@@ -149,6 +157,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
+  '/forex': typeof ForexRoute
   '/liquidity': typeof LiquidityRoute
   '/log': typeof LogRoute
   '/math': typeof MathRoute
@@ -169,6 +178,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/fib'
     | '/footprint'
+    | '/forex'
     | '/liquidity'
     | '/log'
     | '/math'
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/fib'
     | '/footprint'
+    | '/forex'
     | '/liquidity'
     | '/log'
     | '/math'
@@ -205,6 +216,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/fib'
     | '/footprint'
+    | '/forex'
     | '/liquidity'
     | '/log'
     | '/math'
@@ -224,6 +236,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   FibRoute: typeof FibRoute
   FootprintRoute: typeof FootprintRoute
+  ForexRoute: typeof ForexRoute
   LiquidityRoute: typeof LiquidityRoute
   LogRoute: typeof LogRoute
   MathRoute: typeof MathRoute
@@ -266,6 +279,13 @@ declare module '@tanstack/react-router' {
       path: '/footprint'
       fullPath: '/footprint'
       preLoaderRoute: typeof FootprintRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forex': {
+      id: '/forex'
+      path: '/forex'
+      fullPath: '/forex'
+      preLoaderRoute: typeof ForexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/liquidity': {
@@ -360,6 +380,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   FibRoute: FibRoute,
   FootprintRoute: FootprintRoute,
+  ForexRoute: ForexRoute,
   LiquidityRoute: LiquidityRoute,
   LogRoute: LogRoute,
   MathRoute: MathRoute,

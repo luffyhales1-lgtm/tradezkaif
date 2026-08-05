@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchKlines, fetchTopSymbols, fmtPrice, type Interval } from "@/lib/binance";
+import { fetchKlines, fetchTopSymbols, fmtPrice, type Candle, type Interval } from "@/lib/binance";
 import { analyze, type Signal } from "@/lib/analysis";
 import {
   conformalBand,
@@ -14,6 +14,24 @@ import { Panel, Pill, Stat } from "@/components/ui-bits";
 import { INTERVALS } from "@/lib/binance";
 import { cn } from "@/lib/utils";
 
+/** Pluggable market source so the same engine can scan crypto or forex. */
+export type ScanSource = {
+  label: string;
+  universeLabel: string;
+  intervals: readonly Interval[];
+  list: (limit: number) => Promise<string[]>;
+  candles: (symbol: string, interval: Interval, limit: number) => Promise<Candle[]>;
+  format?: (n: number) => string;
+};
+
+export const binanceSource: ScanSource = {
+  label: "Binance USDⓈ-M",
+  universeLabel: "Binance high-volume USDⓈ-M",
+  intervals: INTERVALS,
+  list: async (limit) => (await fetchTopSymbols(limit)).map((t) => t.symbol),
+  candles: (symbol, interval, limit) => fetchKlines(symbol, interval, limit),
+};
+
 export type ScannerConfig = {
   key: string;
   title: string;
@@ -25,6 +43,7 @@ export type ScannerConfig = {
   minProbability: number;
   horizon: string;
   useQuant?: boolean;
+  source?: ScanSource;
 };
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>) {
@@ -44,9 +63,46 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
   return out;
 }
 
+export const TF_MINUTES: Record<string, number> = {
+  "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+  "1h": 60, "2h": 120, "4h": 240, "6h": 360, "12h": 720, "1d": 1440,
+};
+
+/** Higher timeframe used to confirm the primary signal. */
+export function htfOf(interval: Interval): Interval {
+  const map: Record<string, Interval> = {
+    "1m": "15m", "3m": "30m", "5m": "1h", "15m": "4h", "30m": "4h",
+    "1h": "4h", "2h": "1d", "4h": "1d", "6h": "1d", "12h": "1d", "1d": "1d",
+  };
+  return map[interval] ?? "4h";
+}
+
+/** Average true range per bar — drives the "trade completes in" estimate. */
+function avgRange(candles: Candle[], n = 30) {
+  const tail = candles.slice(-n);
+  if (!tail.length) return 0;
+  return tail.reduce((a, c) => a + (c.h - c.l), 0) / tail.length;
+}
+
+/** Expected minutes for price to travel from entry to the first target. */
+export function targetEta(candles: Candle[], interval: Interval, entry: number, tp: number) {
+  const r = avgRange(candles);
+  if (!r) return null;
+  const bars = Math.max(1, Math.abs(tp - entry) / (r * 0.62));
+  return Math.round(bars * (TF_MINUTES[interval] ?? 60));
+}
+
+export const etaLabel = (min: number) =>
+  min < 60 ? `${min}m` : min < 1440 ? `${Math.round(min / 6) / 10}h` : `${(min / 1440).toFixed(1)}d`;
+
 export type ScanResult = Signal & {
   quant?: { hawkes: number; kelly: number; band: string; bayes: number };
+  htf?: { interval: Interval; bias: Signal["bias"]; agrees: boolean };
+  etaMin?: number;
+  completeBy?: number;
+  grade?: "A+" | "A" | "B";
 };
+
 
 export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [interval, setIntervalTf] = useState<Interval>(config.defaultInterval);
@@ -85,15 +141,17 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
     }, 250);
 
     try {
-      const tickers = await fetchTopSymbols(config.universe);
-      const symbols = tickers.map((t) => t.symbol);
+      const src = config.source ?? binanceSource;
+      const symbols = await src.list(config.universe);
       const depth = turbo ? 200 : 300;
+      const fmt = src.format ?? fmtPrice;
       let done = 0;
+      // Pass 1 — score the whole universe on the primary timeframe.
       const scored = await mapLimit(symbols, turbo ? 24 : 14, async (symbol) => {
-        const candles = await fetchKlines(symbol, interval, depth);
+        const candles = await src.candles(symbol, interval, depth);
         done++;
         if (done % 4 === 0 || done === symbols.length) {
-          setProgress(Math.round((done / symbols.length) * 100));
+          setProgress(Math.round((done / symbols.length) * 90));
         }
         const a = analyze(symbol, candles, interval);
         const sig = a.signal;
@@ -120,11 +178,44 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
             Math.min(99, sig.probability * 0.6 + post * 40 + (tail < 0.02 ? 6 : 0)),
           );
         }
-        return { ...sig, quant } as ScanResult;
+        const etaMin = targetEta(candles, interval, sig.entry, sig.targets[0] ?? sig.entry);
+        return {
+          ...sig,
+          quant,
+          ...(etaMin ? { etaMin, completeBy: Date.now() + etaMin * 60_000 } : {}),
+        } as ScanResult;
       });
 
-      setProgress(100);
       setScannedCount(scored.length);
+
+      // Pass 2 — higher-timeframe confirmation on the shortlist only.
+      const shortlist = scored
+        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability - 8)
+        .sort((a, b) => b.probability - a.probability)
+        .slice(0, Math.max(config.results * 3, 12));
+
+      const htf = htfOf(interval);
+      const confirmed = await mapLimit(shortlist, 8, async (s) => {
+        try {
+          const hc = await src.candles(s.symbol, htf, 180);
+          const ha = analyze(s.symbol, hc, htf).signal;
+          const agrees = ha.bias === s.bias;
+          const neutral = ha.bias === "neutral";
+          const probability = Math.round(
+            Math.max(
+              1,
+              Math.min(99, s.probability + (agrees ? 7 : neutral ? 0 : -14)),
+            ),
+          );
+          const grade: ScanResult["grade"] =
+            agrees && probability >= 85 ? "A+" : agrees ? "A" : "B";
+          return { ...s, probability, htf: { interval: htf, bias: ha.bias, agrees }, grade };
+        } catch {
+          return s;
+        }
+      });
+      setProgress(100);
+
       const elapsed = Date.now() - started;
       // Turbo publishes the moment the maths is done instead of padding to the
       // advertised scan window.
@@ -133,8 +224,8 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       }
       if (abort.current) return;
 
-      const top = scored
-        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability)
+      const top = confirmed
+        .filter((s) => s.probability >= config.minProbability && s.htf?.agrees !== false)
         .sort((a, b) => b.probability - a.probability)
         .slice(0, config.results);
 
@@ -144,8 +235,10 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         pushLog({
           kind: "signal",
           symbol: s.symbol,
-          text: `${config.title}: ${s.bias.toUpperCase()} ${s.symbol} @ ${fmtPrice(s.entry)}`,
-          meta: `${s.probability}% confluence · SL ${fmtPrice(s.stop)} · TP1 ${fmtPrice(s.targets[0])}`,
+          text: `${config.title}: ${s.bias.toUpperCase()} ${s.symbol} @ ${fmt(s.entry)}`,
+          meta: `${s.probability}% confluence · SL ${fmt(s.stop)} · TP1 ${fmt(s.targets[0])}${
+            s.etaMin ? ` · TP expected in ~${etaLabel(s.etaMin)}` : ""
+          }`,
         }),
       );
     } catch (e) {
@@ -156,6 +249,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setLeft(config.durationMs / 1000);
     }
   }, [config, interval, running, turbo]);
+
 
   runRef.current = () => void run();
 
@@ -195,7 +289,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       >
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Timeframe</span>
-          {INTERVALS.map((i) => (
+          {(config.source?.intervals ?? INTERVALS).map((i) => (
             <button
               key={i}
               onClick={() => setIntervalTf(i)}
@@ -247,7 +341,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         </div>
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <Stat label="Universe" value={`${config.universe} coins`} hint="Binance high-volume USDⓈ-M" />
+          <Stat label="Universe" value={`${config.universe} ${config.source ? "instruments" : "coins"}`} hint={(config.source ?? binanceSource).universeLabel} />
           <Stat label="Analysed" value={scannedCount || "—"} hint="symbols this run" />
           <Stat label="Progress" value={`${progress}%`} />
           <Stat
@@ -308,7 +402,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
 
       <div className="grid gap-3 lg:grid-cols-2">
         {results.map((s) => (
-          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} />
+          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} fmt={config.source?.format} />
         ))}
       </div>
 
@@ -316,7 +410,15 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   );
 }
 
-export function SignalCard({ signal, horizon }: { signal: ScanResult; horizon: string }) {
+export function SignalCard({
+  signal,
+  horizon,
+  fmt = fmtPrice,
+}: {
+  signal: ScanResult;
+  horizon: string;
+  fmt?: (n: number) => string;
+}) {
   const long = signal.bias === "long";
   return (
     <article className="panel p-4">
@@ -327,19 +429,33 @@ export function SignalCard({ signal, horizon }: { signal: ScanResult; horizon: s
             <Pill tone={long ? "bull" : "bear"}>{signal.bias}</Pill>
             <Pill tone="primary">{signal.probability}% confluence</Pill>
             <Pill>{signal.interval}</Pill>
+            {signal.grade && <Pill tone={signal.grade === "B" ? "warn" : "bull"}>{signal.grade} grade</Pill>}
+            {signal.htf && (
+              <Pill tone={signal.htf.agrees ? "bull" : "warn"}>
+                {signal.htf.interval} {signal.htf.agrees ? "aligned" : signal.htf.bias}
+              </Pill>
+            )}
           </div>
         </div>
         <div className="text-right">
           <div className="text-[10px] uppercase text-muted-foreground">Target window</div>
           <div className="num text-sm">{horizon}</div>
+          {signal.etaMin && (
+            <div className="num pt-1 text-[11px] text-primary">
+              TP1 in ~{etaLabel(signal.etaMin)}
+              {signal.completeBy
+                ? ` · by ${new Date(signal.completeBy).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : ""}
+            </div>
+          )}
         </div>
       </header>
 
       <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
-        <Stat label="Entry" value={fmtPrice(signal.entry)} />
-        <Stat label="Stop" value={fmtPrice(signal.stop)} tone="bear" />
+        <Stat label="Entry" value={fmt(signal.entry)} />
+        <Stat label="Stop" value={fmt(signal.stop)} tone="bear" />
         {signal.targets.map((t, i) => (
-          <Stat key={i} label={`TP${i + 1}`} value={fmtPrice(t)} tone="bull" />
+          <Stat key={i} label={`TP${i + 1}`} value={fmt(t)} tone="bull" />
         ))}
       </div>
 
@@ -416,6 +532,12 @@ export function exportRows(signals: ScanResult[], scannedAt: number) {
     bayes: s.quant?.bayes ?? null,
     kelly: s.quant?.kelly ?? null,
     conformalBand: s.quant?.band ?? null,
+    htfInterval: s.htf?.interval ?? null,
+    htfBias: s.htf?.bias ?? null,
+    htfAligned: s.htf?.agrees ?? null,
+    grade: s.grade ?? null,
+    expectedMinutesToTp1: s.etaMin ?? null,
+    expectedCompletionAt: s.completeBy ? stamp(s.completeBy) : null,
     signalCreatedAt: stamp(s.createdAt),
     scanCompletedAt: stamp(scannedAt),
     exportedAt: stamp(Date.now()),

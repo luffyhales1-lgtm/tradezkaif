@@ -170,6 +170,115 @@ export function openStream(
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * Shared socket hub: one websocket for the whole app.
+ * Every hook subscribes/unsubscribes through here so we never open a
+ * duplicate connection per page (that was starving the trade tape).
+ * ------------------------------------------------------------------ */
+
+type Handler = (data: Record<string, unknown>) => void;
+
+const handlers = new Map<string, Set<Handler>>();
+const statsListeners = new Set<(s: StreamStats) => void>();
+let hubSocket: WebSocket | null = null;
+let hubTimer: ReturnType<typeof setTimeout> | null = null;
+let hubAttempt = 0;
+const hubStats: StreamStats = {
+  status: "connecting",
+  lastMsgAt: 0,
+  messages: 0,
+  dropped: 0,
+  reconnects: 0,
+};
+
+const emitStats = () => statsListeners.forEach((l) => l({ ...hubStats }));
+
+function hubConnect() {
+  if (typeof window === "undefined") return;
+  const streams = [...handlers.keys()];
+  if (!streams.length) return;
+  hubSocket?.close();
+  hubStats.status = "connecting";
+  emitStats();
+  const ws = new WebSocket(WS + streams.join("/"));
+  hubSocket = ws;
+  ws.onopen = () => {
+    hubAttempt = 0;
+    hubStats.status = "open";
+    emitStats();
+  };
+  ws.onmessage = (ev) => {
+    hubStats.messages++;
+    hubStats.lastMsgAt = Date.now();
+    try {
+      const parsed = JSON.parse(ev.data as string) as {
+        stream: string;
+        data: Record<string, unknown>;
+      };
+      handlers.get(parsed.stream)?.forEach((h) => h(parsed.data));
+    } catch {
+      hubStats.dropped++;
+    }
+  };
+  ws.onerror = () => ws.close();
+  ws.onclose = () => {
+    if (hubSocket !== ws) return;
+    hubSocket = null;
+    hubStats.status = "closed";
+    hubStats.reconnects++;
+    emitStats();
+    if (!handlers.size) return;
+    hubAttempt = Math.min(hubAttempt + 1, 5);
+    hubTimer = setTimeout(hubConnect, Math.min(400 * 2 ** hubAttempt, 6000));
+  };
+}
+
+/** Debounced resubscribe so mounting several hooks opens one socket. */
+let resyncTimer: ReturnType<typeof setTimeout> | null = null;
+function hubResync() {
+  if (resyncTimer) clearTimeout(resyncTimer);
+  resyncTimer = setTimeout(() => {
+    resyncTimer = null;
+    if (!handlers.size) {
+      hubSocket?.close();
+      hubSocket = null;
+      return;
+    }
+    hubConnect();
+  }, 60);
+}
+
+/** Subscribe to one or more streams on the shared socket. */
+export function subscribe(
+  streams: string[],
+  onMessage: (stream: string, data: Record<string, unknown>) => void,
+  onStats?: (s: StreamStats) => void,
+) {
+  const bound = streams.map((s) => {
+    const h: Handler = (data) => onMessage(s, data);
+    if (!handlers.has(s)) handlers.set(s, new Set());
+    handlers.get(s)!.add(h);
+    return [s, h] as const;
+  });
+  if (onStats) {
+    statsListeners.add(onStats);
+    onStats({ ...hubStats });
+  }
+  hubResync();
+
+  return () => {
+    bound.forEach(([s, h]) => {
+      const set = handlers.get(s);
+      set?.delete(h);
+      if (set && !set.size) handlers.delete(s);
+    });
+    if (onStats) statsListeners.delete(onStats);
+    if (hubTimer) clearTimeout(hubTimer);
+    hubResync();
+  };
+}
+
+
 export const fmtUsd = (n: number) => {
   const a = Math.abs(n);
   if (a >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;

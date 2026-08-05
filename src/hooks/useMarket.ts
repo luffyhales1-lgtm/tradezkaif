@@ -3,7 +3,7 @@ import {
   fetchDepth,
   fetchKlines,
   fetchTopSymbols,
-  openStream,
+  subscribe,
   type Book,
   type Candle,
   type Interval,
@@ -110,7 +110,7 @@ export function useCandles(symbol: string, interval: Interval, limit = 400) {
 
   useEffect(() => {
     const stream = `${symbol.toLowerCase()}@kline_${interval}`;
-    return openStream([stream], (_s, data) => {
+    return subscribe([stream], (_s, data) => {
       const k = data.k as Record<string, string | number | boolean>;
       const c: Candle = {
         t: Number(k.t),
@@ -135,20 +135,25 @@ export function useCandles(symbol: string, interval: Interval, limit = 400) {
   return { candles: live.length ? live : candles, loading };
 }
 
-/** Aggregated trade tape (order-flow prints). */
+/**
+ * Aggregated trade tape (order-flow prints).
+ * The socket keeps a raw ring buffer; the size filter is applied at render
+ * time so changing "min size" never tears down the live feed.
+ */
 export function useTrades(symbol: string, minUsd = 0, cap = 300) {
-  const [trades, push] = useThrottledState<Trade[]>([], 150);
+  const [tape, push] = useThrottledState<Trade[]>([], 120);
   const ref = useRef<Trade[]>([]);
   const [stats, setStats] = useState<StreamStats | null>(null);
 
   useEffect(() => {
     ref.current = [];
     push([]);
-    return openStream(
+    return subscribe(
       [`${symbol.toLowerCase()}@aggTrade`],
       (_s, d) => {
         const price = Number(d.p);
         const qty = Number(d.q);
+        if (!price || !qty) return;
         const t: Trade = {
           ts: Number(d.T),
           price,
@@ -156,15 +161,23 @@ export function useTrades(symbol: string, minUsd = 0, cap = 300) {
           usd: price * qty,
           buyerMaker: Boolean(d.m),
         };
-        ref.current = [t, ...ref.current].slice(0, 4000);
-        push(ref.current.filter((x) => x.usd >= minUsd).slice(0, cap));
+        const buf = ref.current;
+        buf.unshift(t);
+        if (buf.length > 3000) buf.length = 3000;
+        push(buf.slice(0, 1200));
       },
       setStats,
     );
-  }, [symbol, minUsd, cap, push]);
+  }, [symbol, push]);
 
-  return { trades, stats };
+  const trades = useMemo(
+    () => (minUsd > 0 ? tape.filter((t) => t.usd >= minUsd) : tape).slice(0, cap),
+    [tape, minUsd, cap],
+  );
+
+  return { trades, tape, stats };
 }
+
 
 /** Order book snapshot refreshed by the diff stream. */
 export function useBook(symbol: string, depth = 500) {
@@ -187,7 +200,7 @@ export function useBook(symbol: string, depth = 500) {
     seed();
     const reseed = setInterval(seed, 20_000);
 
-    const close = openStream([`${symbol.toLowerCase()}@depth@500ms`], (_s, d) => {
+    const close = subscribe([`${symbol.toLowerCase()}@depth@500ms`], (_s, d) => {
       const [bids, asks] = ref.current;
       const apply = (m: Map<number, number>, rows: string[][]) => {
         rows.forEach(([p, q]) => {
@@ -221,7 +234,7 @@ export function useMarkPrice(symbol: string) {
   const [price, push] = useThrottledState<number>(0, 400);
   useEffect(
     () =>
-      openStream([`${symbol.toLowerCase()}@markPrice@1s`], (_s, d) => push(Number(d.p))),
+      subscribe([`${symbol.toLowerCase()}@markPrice@1s`], (_s, d) => push(Number(d.p))),
     [symbol, push],
   );
   return price;

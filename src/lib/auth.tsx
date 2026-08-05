@@ -37,7 +37,7 @@ const AccessContext = createContext<Ctx | null>(null);
 const TIER_PAGES: Record<SubscriptionTier, string[]> = {
   normal: ["/", "/orderflow", "/news"],
   balanced: ["/", "/orderflow", "/news", "/liquidity", "/spoofing"],
-  ultimate: ["/", "/orderflow", "/news", "/liquidity", "/spoofing", "/footprint", "/fib", "/swing", "/scalping", "/ultimate", "/structure", "/whale", "/summary", "/log"],
+  ultimate: ["/", "/orderflow", "/news", "/liquidity", "/spoofing", "/footprint", "/fib", "/swing", "/scalping", "/ultimate", "/forex", "/structure", "/whale", "/summary", "/log"],
 };
 
 export function AccessProvider({ children }: { children: ReactNode }) {
