@@ -4,6 +4,7 @@ import { lovable } from "@/integrations/lovable";
 import { INSTAGRAM_URL, useAccess } from "@/lib/auth";
 import { Shell } from "@/components/Shell";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 
 /** Password / admin gate rendered before any trading surface. */
 export function AccessGate({ children }: { children: ReactNode }) {
@@ -13,6 +14,12 @@ export function AccessGate({ children }: { children: ReactNode }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const expired = Boolean(session?.subscription && new Date(session.subscription.endsAt).getTime() <= Date.now());
+
+  useEffect(() => {
+    if (!expired) return;
+    setError("Your timed access or subscription has expired. Ask the admin to reactivate it.");
+  }, [expired]);
 
   if (!ready) {
     return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Loading…</div>;
@@ -26,11 +33,12 @@ export function AccessGate({ children }: { children: ReactNode }) {
         <div className="panel w-full max-w-xl p-6 text-center">
           <h1 className="font-display text-2xl font-bold text-primary">Access required</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            This page is not included in your current subscription.
+            {expired ? "Your timed access or subscription has expired." : "This page is not included in your current subscription."}
             {window.location.pathname === "/math" && " Math Scanner needs separate admin permission."}
           </p>
           <button onClick={async () => setError((await requestAccess(`Access requested for ${window.location.pathname}`)) ?? "Request sent to admin.")} className="mt-4 rounded bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Ask admin for access</button>
           {error && <p className="mt-3 text-xs text-muted-foreground">{error}</p>}
+          <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm text-primary"><Instagram className="size-4" /> @abdul_kaif12</a>
         </div>
       </div>
     );

@@ -27,10 +27,11 @@ function Spoofing() {
   const book = useBook(symbol);
   const price = useMarkPrice(symbol);
   const [minUsd, setMinUsd] = useLocalState("cotraders.spoof.min2", 250_000);
+  const [riskThreshold, setRiskThreshold] = useLocalState("cotraders.spoof.risk", HIGH_RISK);
   const { tracking, confirmed, spoofPct } = useSpoofRadar(symbol, book, price, minUsd);
   const left = useCountdown(CONFIRM_MS / 1000);
   const now = useNow(500);
-  const highRisk = tracking.filter((t) => t.risk >= HIGH_RISK);
+  const highRisk = tracking.filter((t) => t.risk >= riskThreshold);
 
   return (
     <div className="space-y-4">
@@ -49,6 +50,10 @@ function Spoofing() {
               {fmtUsd(v)}
             </button>
           ))}
+          <label className="text-[10px] text-muted-foreground">
+            Mark spoofing ≥ {riskThreshold}/100
+            <input type="range" min="60" max="95" value={riskThreshold} onChange={(event) => setRiskThreshold(Number(event.target.value))} className="block w-28 accent-primary" />
+          </label>
           <div className="num flex size-14 items-center justify-center rounded-full border-2 border-primary/60 text-lg font-bold text-primary">
             {left}
           </div>
@@ -59,7 +64,7 @@ function Spoofing() {
         <Stat label="Spoof ratio" value={`${spoofPct}%`} tone={spoofPct > 50 ? "bear" : "bull"} hint="of confirmed walls" />
         <Stat label="Tracking" value={tracking.length} hint="walls under 30s watch" />
         <Stat
-          label={`Risk ≥ ${HIGH_RISK}`}
+          label={`Risk ≥ ${riskThreshold}`}
           value={highRisk.length}
           tone={highRisk.length ? "bear" : "bull"}
           hint="live spoof suspects"
@@ -71,12 +76,12 @@ function Spoofing() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel
           title="Radar · tracking"
-          subtitle={`Each wall needs 30s before it is judged · flagged above ${HIGH_RISK}/100`}
+          subtitle={`Each wall needs 30s before it is judged · flagged above ${riskThreshold}/100`}
         >
           <div className="max-h-[460px] space-y-1.5 overflow-auto scroll-lock">
             {tracking.map((t) => {
               const age = Math.min(CONFIRM_MS, now - t.firstSeen);
-              const hot = t.risk >= HIGH_RISK;
+               const hot = t.risk >= riskThreshold;
               return (
                 <div
                   key={t.id}

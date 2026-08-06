@@ -43,6 +43,7 @@ const TIER_PAGES: Record<SubscriptionTier, string[]> = {
 export function AccessProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<AccessState | null>(null);
+  const [, setClock] = useState(0);
 
   const refresh = useCallback(async () => {
     const { data } = await supabase.auth.getUser();
@@ -74,6 +75,12 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     });
     return () => data.subscription.unsubscribe();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!session?.subscription?.active) return;
+    const timer = setInterval(() => setClock((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [session?.subscription?.active, session?.subscription?.endsAt]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
