@@ -24,6 +24,7 @@ function Admin() {
   const [requests, setRequests] = useState<Tables<"access_requests">[]>([]);
   const [roles, setRoles] = useState<Tables<"user_roles">[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [demoMinutes, setDemoMinutes] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     const [profileResult, subscriptionResult, requestResult, roleResult] = await Promise.all([
@@ -62,6 +63,22 @@ function Admin() {
     const { error } = await supabase.from("subscriptions").upsert({ user_id: userId, tier, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), active: true }, { onConflict: "user_id" });
     if (!error) await supabase.from("profiles").update({ access_status: "active" }).eq("id", userId);
     setNotice(error?.message ?? `${tier} access activated for ${days} days.`);
+    await load();
+  };
+
+  const setTimedAccess = async (userId: string) => {
+    const minutes = Math.max(1, Math.min(1440, demoMinutes[userId] ?? 10));
+    const startsAt = new Date();
+    const endsAt = new Date(startsAt.getTime() + minutes * 60_000);
+    const { error } = await supabase.from("subscriptions").upsert({
+      user_id: userId,
+      tier: "ultimate",
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+      active: true,
+    }, { onConflict: "user_id" });
+    if (!error) await supabase.from("profiles").update({ access_status: "active" }).eq("id", userId);
+    setNotice(error?.message ?? `Demo access opened for ${minutes} minute${minutes === 1 ? "" : "s"}.`);
     await load();
   };
 
@@ -148,6 +165,21 @@ function Admin() {
                   {(["normal", "balanced", "ultimate"] as const).map((tier) => <button key={tier} onClick={() => void setSubscription(profile.id, tier, 30)} className="rounded border border-border px-2 py-1 capitalize hover:bg-secondary">{tier} · 30d</button>)}
                   <button onClick={() => void supabase.from("user_page_permissions").upsert({ user_id: profile.id, page_key: "/math", allowed: true }, { onConflict: "user_id,page_key" }).then(() => setNotice("Math Scanner access granted."))} className="rounded border border-accent/50 px-2 py-1 text-accent">Grant Math</button>
                   <button onClick={() => void revoke(profile.id)} className="rounded border border-bear/50 px-2 py-1 text-bear">Revoke</button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-border pt-2">
+                  <label className="text-muted-foreground">
+                    Demo minutes
+                    <input
+                      type="number"
+                      min="1"
+                      max="1440"
+                      value={demoMinutes[profile.id] ?? 10}
+                      onChange={(event) => setDemoMinutes((current) => ({ ...current, [profile.id]: Number(event.target.value) }))}
+                      className="ml-2 w-20 rounded border border-border bg-background px-2 py-1 text-foreground"
+                    />
+                  </label>
+                  <button onClick={() => void setTimedAccess(profile.id)} className="rounded border border-warn/60 bg-warn/10 px-2 py-1 text-warn">Start timed demo</button>
+                  {sub?.active && <span className="num text-muted-foreground">expires {new Date(sub.ends_at).toLocaleTimeString()}</span>}
                 </div>
               </div>;
             })}

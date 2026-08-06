@@ -13,6 +13,11 @@ import { pushLog } from "@/lib/bus";
 import { Panel, Pill, Stat } from "@/components/ui-bits";
 import { INTERVALS } from "@/lib/binance";
 import { cn } from "@/lib/utils";
+import {
+  defaultScannerSettings,
+  SCANNER_PRESETS,
+  type ScannerSettings,
+} from "@/lib/scanner-settings";
 
 /** Pluggable market source so the same engine can scan crypto or forex. */
 export type ScanSource = {
@@ -103,6 +108,21 @@ export type ScanResult = Signal & {
   grade?: "A+" | "A" | "B";
 };
 
+type PaperPosition = {
+  id: string;
+  symbol: string;
+  bias: "long" | "short";
+  entry: number;
+  mark: number;
+  stop: number;
+  target: number;
+  amount: number;
+  openedAt: number;
+  closedAt?: number;
+  status: "open" | "tp" | "sl" | "closed";
+  pnl: number;
+};
+
 
 export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [interval, setIntervalTf] = useState<Interval>(config.defaultInterval);
@@ -116,6 +136,18 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [turbo, setTurbo] = useState(false);
   const [auto, setAuto] = useState(false);
   const [autoEvery, setAutoEvery] = useState(60);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<ScannerSettings>(() => {
+    if (typeof window === "undefined") return defaultScannerSettings(config.minProbability);
+    try {
+      const saved = window.localStorage.getItem(`cotraders.scanner.${config.key}`);
+      return saved ? { ...defaultScannerSettings(config.minProbability), ...JSON.parse(saved) } : defaultScannerSettings(config.minProbability);
+    } catch {
+      return defaultScannerSettings(config.minProbability);
+    }
+  });
+  const [paperAmount, setPaperAmount] = useState(100);
+  const [paperPositions, setPaperPositions] = useState<PaperPosition[]>([]);
   const abort = useRef(false);
   const runRef = useRef<() => void>(() => {});
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -127,6 +159,53 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
     },
     [],
   );
+
+  useEffect(() => {
+    window.localStorage.setItem(`cotraders.scanner.${config.key}`, JSON.stringify(settings));
+  }, [config.key, settings]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(`cotraders.paper.${config.key}`);
+      if (saved) setPaperPositions(JSON.parse(saved) as PaperPosition[]);
+    } catch {
+      setPaperPositions([]);
+    }
+  }, [config.key]);
+
+  useEffect(() => {
+    window.localStorage.setItem(`cotraders.paper.${config.key}`, JSON.stringify(paperPositions));
+  }, [config.key, paperPositions]);
+
+  useEffect(() => {
+    if (!paperPositions.some((position) => position.status === "open")) return;
+    const source = config.source ?? binanceSource;
+    let active = true;
+    const update = async () => {
+      const open = paperPositions.filter((position) => position.status === "open");
+      const marks = await mapLimit(open, 6, async (position) => {
+        const candles = await source.candles(position.symbol, interval, 2);
+        return { id: position.id, mark: candles.at(-1)?.c ?? position.mark };
+      });
+      if (!active || !marks.length) return;
+      const markMap = new Map(marks.map((item) => [item.id, item.mark]));
+      setPaperPositions((current) => current.map((position) => {
+        if (position.status !== "open") return position;
+        const mark = markMap.get(position.id) ?? position.mark;
+        const move = position.bias === "long" ? (mark - position.entry) / position.entry : (position.entry - mark) / position.entry;
+        const hitTp = position.bias === "long" ? mark >= position.target : mark <= position.target;
+        const hitSl = position.bias === "long" ? mark <= position.stop : mark >= position.stop;
+        const status = hitTp ? "tp" : hitSl ? "sl" : "open";
+        if (status !== "open") {
+          pushLog({ kind: "paper", symbol: position.symbol, text: `PAPER ${status.toUpperCase()} · ${position.bias.toUpperCase()}`, meta: `${move >= 0 ? "+" : ""}${(move * position.amount).toFixed(2)} USDT` });
+        }
+        return { ...position, mark, pnl: move * position.amount, status, ...(status !== "open" ? { closedAt: Date.now() } : {}) };
+      }));
+    };
+    void update();
+    const timer = setInterval(update, 5000);
+    return () => { active = false; clearInterval(timer); };
+  }, [config.source, interval, paperPositions.some((position) => position.status === "open")]);
 
   const run = useCallback(async () => {
     if (running) return;
@@ -153,7 +232,10 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         if (done % 4 === 0 || done === symbols.length) {
           setProgress(Math.round((done / symbols.length) * 90));
         }
-        const a = analyze(symbol, candles, interval);
+        const a = analyze(symbol, candles, interval, null, {
+          structureStrength: settings.structureStrength / 100,
+          maxAtrPct: settings.maxAtrPct / 100,
+        });
         const sig = a.signal;
         let quant: ScanResult["quant"];
         if (config.useQuant) {
@@ -198,8 +280,11 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       const confirmed = await mapLimit(shortlist, 8, async (s) => {
         try {
           const hc = await src.candles(s.symbol, htf, 180);
-          const ha = analyze(s.symbol, hc, htf).signal;
-          const agrees = ha.bias === s.bias;
+          const ha = analyze(s.symbol, hc, htf, null, {
+            structureStrength: settings.structureStrength / 100,
+            maxAtrPct: settings.maxAtrPct / 100,
+          }).signal;
+          const agrees = ha.bias === s.bias && ha.probability >= settings.htfStrength;
           const neutral = ha.bias === "neutral";
           const probability = Math.round(
             Math.max(
@@ -225,7 +310,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       if (abort.current) return;
 
       const top = confirmed
-        .filter((s) => s.probability >= config.minProbability && s.htf?.agrees !== false)
+        .filter((s) => s.probability >= settings.minProbability && s.rr >= settings.minRiskReward && s.htf?.agrees !== false)
         .sort((a, b) => b.probability - a.probability)
         .slice(0, config.results);
 
@@ -248,7 +333,26 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setRunning(false);
       setLeft(config.durationMs / 1000);
     }
-  }, [config, interval, running, turbo]);
+  }, [config, interval, running, settings, turbo]);
+
+  const openPaper = useCallback((signal: ScanResult) => {
+    if (signal.bias === "neutral" || !signal.targets[0] || paperAmount <= 0) return;
+    const position: PaperPosition = {
+      id: `${signal.symbol}-${Date.now()}`,
+      symbol: signal.symbol,
+      bias: signal.bias,
+      entry: signal.entry,
+      mark: signal.entry,
+      stop: signal.stop,
+      target: signal.targets[0],
+      amount: paperAmount,
+      openedAt: Date.now(),
+      status: "open",
+      pnl: 0,
+    };
+    setPaperPositions((current) => [position, ...current].slice(0, 100));
+    pushLog({ kind: "paper", symbol: signal.symbol, text: `PAPER ${signal.bias.toUpperCase()} opened @ ${signal.entry}`, meta: `${paperAmount.toFixed(2)} USDT · SL ${signal.stop} · TP ${signal.targets[0]}` });
+  }, [paperAmount]);
 
 
   runRef.current = () => void run();
@@ -306,6 +410,38 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         </div>
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setSettingsOpen((open) => !open)}
+            className="rounded border border-primary/50 px-2 py-1 text-xs text-primary"
+          >
+            Advanced settings
+          </button>
+          {Object.entries(SCANNER_PRESETS).map(([name, preset]) => (
+            <button key={name} onClick={() => setSettings(preset)} className="rounded border border-border px-2 py-1 text-xs capitalize text-muted-foreground">
+              {name.replace(/([A-Z])/g, " $1")}
+            </button>
+          ))}
+          <span className="text-[10px] text-muted-foreground">Saved for this strategy</span>
+        </div>
+
+        {settingsOpen && (
+          <div className="mb-3 grid gap-3 border-y border-border py-3 sm:grid-cols-2 lg:grid-cols-5">
+            {([
+              ["minProbability", "Min probability", 55, 95, 1, "%"],
+              ["htfStrength", "HTF strength", 40, 90, 1, "%"],
+              ["structureStrength", "Structure strength", 10, 80, 1, "%"],
+              ["maxAtrPct", "Max volatility", 1, 10, 0.5, "% ATR"],
+              ["minRiskReward", "Minimum R:R", 1, 3, 0.05, "R"],
+            ] as const).map(([key, label, min, max, step, suffix]) => (
+              <label key={key} className="text-xs text-muted-foreground">
+                <span className="flex justify-between"><span>{label}</span><span className="num text-foreground">{settings[key]}{suffix}</span></span>
+                <input type="range" min={min} max={max} step={step} value={settings[key]} onChange={(event) => setSettings((current) => ({ ...current, [key]: Number(event.target.value) }))} className="mt-1 w-full accent-primary" />
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">High frequency</span>
           <button
             onClick={() => setTurbo(!turbo)}
@@ -346,7 +482,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
           <Stat label="Progress" value={`${progress}%`} />
           <Stat
             label="Min confluence"
-            value={`${config.minProbability}%`}
+            value={`${settings.minProbability}%`}
             hint={config.horizon}
           />
         </div>
@@ -364,12 +500,35 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       {scannedAt && !results.length && (
         <Panel>
           <p className="text-sm text-muted-foreground">
-            No setup cleared the {config.minProbability}% confluence filter this run. That is a
+             No setup cleared the {settings.minProbability}% confluence filter this run. That is a
             valid result — no trade is better than a forced trade. Re-scan after the next candle
             closes.
           </p>
         </Panel>
       )}
+
+      <Panel title="Paper trading" subtitle="Virtual positions use each setup's fixed entry, SL and TP1">
+        <div className="mb-3 flex flex-wrap items-end gap-3">
+          <label className="text-xs text-muted-foreground">
+            Position amount (USDT)
+            <input type="number" min="1" step="10" value={paperAmount} onChange={(event) => setPaperAmount(Math.max(1, Number(event.target.value) || 1))} className="mt-1 block w-36 rounded border border-border bg-background px-2 py-1.5 text-foreground" />
+          </label>
+          <Stat label="Open" value={paperPositions.filter((position) => position.status === "open").length} />
+          <Stat label="Realized + live P&L" value={`${paperPositions.reduce((sum, position) => sum + position.pnl, 0).toFixed(2)} USDT`} tone={paperPositions.reduce((sum, position) => sum + position.pnl, 0) >= 0 ? "bull" : "bear"} />
+          {paperPositions.length > 0 && <button onClick={() => setPaperPositions([])} className="rounded border border-border px-2 py-1.5 text-xs text-muted-foreground">Clear paper book</button>}
+        </div>
+        <div className="max-h-48 overflow-auto text-xs">
+          {paperPositions.map((position) => (
+            <div key={position.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-t border-border py-2">
+              <span><strong>{position.symbol}</strong> · {position.bias.toUpperCase()} · {position.amount.toFixed(0)} USDT</span>
+              <span className="num">mark {((config.source?.format ?? fmtPrice)(position.mark))}</span>
+              <span className={cn("num", position.pnl >= 0 ? "text-bull" : "text-bear")}>{position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}</span>
+              <Pill tone={position.status === "tp" ? "bull" : position.status === "sl" ? "bear" : "primary"}>{position.status}</Pill>
+            </div>
+          ))}
+          {!paperPositions.length && <p className="py-4 text-center text-muted-foreground">Open a paper position from any scanner result.</p>}
+        </div>
+      </Panel>
 
       {scannedAt && results.length > 0 && (
         <Panel
@@ -402,7 +561,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
 
       <div className="grid gap-3 lg:grid-cols-2">
         {results.map((s) => (
-          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} fmt={config.source?.format} />
+          <SignalCard key={s.symbol} signal={s} horizon={config.horizon} fmt={config.source?.format} onPaper={openPaper} paperAmount={paperAmount} />
         ))}
       </div>
 
@@ -414,10 +573,14 @@ export function SignalCard({
   signal,
   horizon,
   fmt = fmtPrice,
+  onPaper,
+  paperAmount,
 }: {
   signal: ScanResult;
   horizon: string;
   fmt?: (n: number) => string;
+  onPaper?: (signal: ScanResult) => void;
+  paperAmount?: number;
 }) {
   const long = signal.bias === "long";
   return (
@@ -491,6 +654,11 @@ export function SignalCard({
       >
         Export CSV report
       </button>
+      {onPaper && (
+        <button onClick={() => onPaper(signal)} className="mt-2 w-full rounded-lg border border-primary/50 bg-primary/10 py-1.5 text-xs font-semibold text-primary">
+          Open {paperAmount?.toFixed(0)} USDT paper trade
+        </button>
+      )}
     </article>
   );
 }

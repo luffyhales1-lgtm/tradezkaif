@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchDepth,
+  fetchAggTrades,
   fetchKlines,
   fetchTopSymbols,
   subscribe,
@@ -146,28 +147,59 @@ export function useTrades(symbol: string, minUsd = 0, cap = 300) {
   const [stats, setStats] = useState<StreamStats | null>(null);
 
   useEffect(() => {
+    let alive = true;
+    const seen = new Set<string>();
     ref.current = [];
     push([]);
-    return subscribe(
+    const ingest = (t: Trade) => {
+      const key = t.id !== undefined ? `id:${t.id}` : `${t.ts}:${t.price}:${t.qty}:${t.buyerMaker}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (seen.size > 6000) {
+        const keep = [...seen].slice(-3000);
+        seen.clear();
+        keep.forEach((item) => seen.add(item));
+      }
+      const buf = ref.current;
+      buf.unshift(t);
+      if (buf.length > 3000) buf.length = 3000;
+      push(buf.slice(0, 1200));
+    };
+    const stop = subscribe(
       [`${symbol.toLowerCase()}@aggTrade`],
       (_s, d) => {
         const price = Number(d.p);
         const qty = Number(d.q);
         if (!price || !qty) return;
-        const t: Trade = {
+        ingest({
+          id: Number.isFinite(Number(d.a)) ? Number(d.a) : undefined,
           ts: Number(d.T),
           price,
           qty,
           usd: price * qty,
           buyerMaker: Boolean(d.m),
-        };
-        const buf = ref.current;
-        buf.unshift(t);
-        if (buf.length > 3000) buf.length = 3000;
-        push(buf.slice(0, 1200));
+        });
       },
       setStats,
     );
+    // Bootstrap immediately and poll lightly as a fallback. Dedupe keeps the
+    // REST and socket paths from ever showing the same print twice.
+    const sync = async () => {
+      try {
+        const rows = await fetchAggTrades(symbol, 500);
+        if (!alive) return;
+        rows.forEach(ingest);
+      } catch {
+        // The live socket remains the primary path.
+      }
+    };
+    void sync();
+    const poll = setInterval(sync, 2500);
+    return () => {
+      alive = false;
+      clearInterval(poll);
+      stop();
+    };
   }, [symbol, push]);
 
   const trades = useMemo(

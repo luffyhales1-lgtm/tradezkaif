@@ -43,6 +43,7 @@ const TIER_PAGES: Record<SubscriptionTier, string[]> = {
 export function AccessProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<AccessState | null>(null);
+  const [clock, setClock] = useState(0);
 
   const refresh = useCallback(async () => {
     const { data } = await supabase.auth.getUser();
@@ -75,6 +76,12 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     return () => data.subscription.unsubscribe();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!session?.subscription?.active) return;
+    const timer = setInterval(() => setClock((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [session?.subscription?.active, session?.subscription?.endsAt]);
+
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (!error) await refresh();
@@ -91,7 +98,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     if (!session?.user.email) return "Sign in before requesting access.";
     const { error } = await supabase.from("access_requests").insert({ user_id: session.user.id, email: session.user.email, message: message.trim().slice(0, 1000) });
     return error?.message ?? null;
-  }, [session]);
+  }, [clock, session]);
 
   const logout = useCallback(async () => { await supabase.auth.signOut(); setSession(null); }, []);
 

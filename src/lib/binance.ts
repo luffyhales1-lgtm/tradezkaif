@@ -16,12 +16,32 @@ export type Candle = {
 };
 
 export type Trade = {
+  id?: number;
   ts: number;
   price: number;
   qty: number;
   usd: number;
   buyerMaker: boolean;
 };
+
+/** REST safety-net for networks that throttle or block futures WebSockets. */
+export async function fetchAggTrades(symbol: string, limit = 500): Promise<Trade[]> {
+  const res = await fetch(`${REST}/fapi/v1/aggTrades?symbol=${symbol}&limit=${limit}`);
+  if (!res.ok) throw new Error(`aggTrades ${res.status}`);
+  const raw = (await res.json()) as Array<Record<string, string | number | boolean>>;
+  return raw.map((row) => {
+    const price = Number(row.p);
+    const qty = Number(row.q);
+    return {
+      id: Number(row.a),
+      ts: Number(row.T),
+      price,
+      qty,
+      usd: price * qty,
+      buyerMaker: Boolean(row.m),
+    };
+  });
+}
 
 export type DepthLevel = { price: number; qty: number; usd: number };
 export type Book = { bids: DepthLevel[]; asks: DepthLevel[]; ts: number };
