@@ -276,8 +276,42 @@ export type Signal = {
   horizon: string;
 };
 
+export type AnalyzeOptions = {
+  structureStrength?: number;
+  maxAtrPct?: number;
+};
+
+function trendStructure(candles: Candle[]) {
+  const tail = candles.slice(-60);
+  if (tail.length < 20) return { bias: "neutral" as Bias, strength: 0, detail: "Not enough structure" };
+  const regression = (values: number[]) => {
+    const n = values.length;
+    const xMean = (n - 1) / 2;
+    const yMean = values.reduce((sum, value) => sum + value, 0) / n;
+    let top = 0;
+    let bottom = 0;
+    values.forEach((value, index) => {
+      top += (index - xMean) * (value - yMean);
+      bottom += (index - xMean) ** 2;
+    });
+    return bottom ? top / bottom : 0;
+  };
+  const closeMean = tail.reduce((sum, candle) => sum + candle.c, 0) / tail.length || 1;
+  const closeSlope = regression(tail.map((candle) => candle.c)) / closeMean;
+  const highSlope = regression(tail.map((candle) => candle.h)) / closeMean;
+  const lowSlope = regression(tail.map((candle) => candle.l)) / closeMean;
+  const alignedUp = closeSlope > 0 && highSlope > 0 && lowSlope > 0;
+  const alignedDown = closeSlope < 0 && highSlope < 0 && lowSlope < 0;
+  const strength = Math.min(1, Math.abs(closeSlope) * 220);
+  return {
+    bias: alignedUp ? "long" as Bias : alignedDown ? "short" as Bias : "neutral" as Bias,
+    strength,
+    detail: `${alignedUp ? "Higher highs / higher lows" : alignedDown ? "Lower highs / lower lows" : "Mixed swing structure"} · slope ${(closeSlope * 100).toFixed(3)}%/bar`,
+  };
+}
+
 /** Weighted multi-factor confluence used by every scanner. */
-export function analyze(symbol: string, candles: Candle[], interval: string, book?: Book | null) {
+export function analyze(symbol: string, candles: Candle[], interval: string, book?: Book | null, options: AnalyzeOptions = {}) {
   const closes = candles.map((c) => c.c);
   const e21 = ema(closes, 21);
   const e50 = ema(closes, 50);
@@ -290,6 +324,14 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
   const price = last.c;
   const atrNow = a.at(-1) ?? price * 0.004;
   const conf: Confluence[] = [];
+  const structure = trendStructure(candles);
+  const requiredStructure = options.structureStrength ?? 0.28;
+  conf.push({
+    label: "Trendline & swing structure",
+    weight: structure.strength >= requiredStructure ? 20 : 5,
+    bias: structure.strength >= requiredStructure ? structure.bias : "neutral",
+    detail: structure.detail,
+  });
 
   const trendUp = e21.at(-1)! > e50.at(-1)! && price > e200.at(-1)!;
   const trendDown = e21.at(-1)! < e50.at(-1)! && price < e200.at(-1)!;
@@ -379,6 +421,15 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     detail: `${(volNow / volAvg).toFixed(2)}× 60-candle average`,
   });
 
+  const atrPct = atrNow / Math.max(price, 1e-9);
+  const maxAtrPct = options.maxAtrPct ?? 0.055;
+  conf.push({
+    label: "Volatility regime",
+    weight: atrPct <= maxAtrPct ? 10 : 0,
+    bias: atrPct <= maxAtrPct ? structure.bias : "neutral",
+    detail: `${(atrPct * 100).toFixed(2)}% ATR${atrPct > maxAtrPct ? " · unstable" : " · controlled"}`,
+  });
+
   const longScore = conf.filter((c) => c.bias === "long").reduce((s, c) => s + c.weight, 0);
   const shortScore = conf.filter((c) => c.bias === "short").reduce((s, c) => s + c.weight, 0);
   const total = conf.reduce((s, c) => s + c.weight, 0) || 1;
@@ -388,11 +439,18 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
   const probability = Math.round(Math.min(96, 45 + dominance * 55));
 
   const stopDist = atrNow * 1.35;
-  const stop = bias === "long" ? price - stopDist : price + stopDist;
+  const swingLow = Math.min(...candles.slice(-24).map((c) => c.l));
+  const swingHigh = Math.max(...candles.slice(-24).map((c) => c.h));
+  // Stops sit beyond the latest swing plus a small volatility buffer instead
+  // of directly inside the obvious liquidity pocket.
+  const stop = bias === "long"
+    ? Math.min(price - stopDist, swingLow - atrNow * 0.12)
+    : Math.max(price + stopDist, swingHigh + atrNow * 0.12);
+  const risk = Math.abs(price - stop);
   const targets =
     bias === "long"
-      ? [price + stopDist * 1.2, price + stopDist * 2, price + stopDist * 3.2]
-      : [price - stopDist * 1.2, price - stopDist * 2, price - stopDist * 3.2];
+      ? [price + risk * 1.2, price + risk * 2, price + risk * 3.2]
+      : [price - risk * 1.2, price - risk * 2, price - risk * 3.2];
 
   const signal: Signal = {
     symbol,
