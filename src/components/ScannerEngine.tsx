@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchKlines, fetchTopSymbols, fmtPrice, type Candle, type Interval } from "@/lib/binance";
-import { analyze, type Signal } from "@/lib/analysis";
+import { analyze, qualify, type Qualification, type Signal } from "@/lib/analysis";
 import {
   conformalBand,
   forwardReturns,
@@ -8,16 +8,20 @@ import {
   hawkesIntensity,
   quantile,
   bayes,
+  rmtSignalRatio,
 } from "@/lib/quant";
 import { pushLog } from "@/lib/bus";
 import { Panel, Pill, Stat } from "@/components/ui-bits";
 import { INTERVALS } from "@/lib/binance";
+import { SignalScreener } from "@/components/SignalScreener";
+import { downloadReportPdf } from "@/lib/pdf";
 import { cn } from "@/lib/utils";
 import {
   defaultScannerSettings,
   SCANNER_PRESETS,
   type ScannerSettings,
 } from "@/lib/scanner-settings";
+
 
 /** Pluggable market source so the same engine can scan crypto or forex. */
 export type ScanSource = {
