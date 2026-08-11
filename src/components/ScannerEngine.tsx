@@ -833,3 +833,51 @@ export function exportSignalCsv(signal: ScanResult) {
   exportScanCsv([signal], signal.createdAt, `${signal.symbol}-${signal.interval}`);
 }
 
+
+/** Printable scan report: setups, TP/SL zones, quant metrics and factor checks. */
+export function exportScanPdf(
+  signals: ScanResult[],
+  scannedAt: number,
+  title = "Scanner report",
+  key = "scan",
+) {
+  if (!signals.length) return;
+  downloadReportPdf({
+    title,
+    subtitle: `${signals.length} setup(s) · scan completed ${new Date(scannedAt).toLocaleString()}`,
+    fileName: `cotraders-${key}-${scannedAt}.pdf`,
+    sections: [
+      {
+        heading: "Setups",
+        table: {
+          headers: ["Symbol", "Bias", "Prob", "Mom", "Entry", "SL", "TP1", "TP3", "Grade"],
+          rows: signals.map((s) => [
+            s.symbol,
+            s.bias.toUpperCase(),
+            `${s.probability}%`,
+            `${s.momentum ?? "—"}`,
+            fmtPrice(s.entry),
+            fmtPrice(s.stop),
+            s.targets[0] ? fmtPrice(s.targets[0]) : "—",
+            s.targets[2] ? fmtPrice(s.targets[2]) : "—",
+            s.grade ?? "—",
+          ]),
+        },
+      },
+      ...signals.map((s) => ({
+        heading: `${s.symbol} · ${s.bias.toUpperCase()} · ${s.interval}`,
+        lines: [
+          `Entry ${fmtPrice(s.entry)} · SL ${fmtPrice(s.stop)} · TP ${s.targets.map(fmtPrice).join(" / ")}`,
+          s.etaMin ? `TP1 expected in ~${etaLabel(s.etaMin)}` : "",
+          s.quant
+            ? `Quant — Hawkes ${s.quant.hawkes.toFixed(3)} · Bayes ${(s.quant.bayes * 100).toFixed(1)}% · Kelly ${(s.quant.kelly * 100).toFixed(2)}% · band ${s.quant.band} · RMT ${(s.quant.rmt * 100).toFixed(1)}%`
+            : "",
+          s.qualification
+            ? `Factor gate — ${s.qualification.aligned} aligned, conflicts: ${s.qualification.conflicts.join(", ") || "none"}`
+            : "",
+          ...s.confluence.map((c) => `• ${c.label} (${c.bias}): ${c.detail}`),
+        ].filter(Boolean),
+      })),
+    ],
+  });
+}
