@@ -502,6 +502,22 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     horizon: interval,
   };
 
+  // Momentum grade: taker aggression + volume expansion + resting book pressure.
+  const volRatio = volNow / volAvg;
+  const directional = bias === "short" ? -1 : 1;
+  const momentum = Math.round(
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.abs(deltaRatio) * 160 * (Math.sign(deltaRatio) === directional ? 1 : -0.5) +
+          Math.min(45, (volRatio - 1) * 55) +
+          (ba ? ba.imbalance * directional * 60 : 0) +
+          22,
+      ),
+    ),
+  );
+
   return {
     signal,
     price,
@@ -511,12 +527,88 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     bb: { upper: bb.upper.at(-1)!, lower: bb.lower.at(-1)!, mid: bb.mid.at(-1)! },
     delta: d,
     deltaRatio,
+    volRatio,
+    momentum,
     sr,
     obs,
     liq,
+    fvgs,
     fib: fibLevels(candles),
     book: ba,
   };
 }
 
 export type Analysis = ReturnType<typeof analyze>;
+
+/** Factors a setup must not contradict before the scanner publishes it. */
+export const REQUIRED_FACTORS = [
+  "Trendline & swing structure",
+  "EMA trend (21/50/200)",
+  "RSI(14)",
+  "Bollinger position",
+  "Footprint delta (12 candles)",
+  "Structure zone",
+  "Volume momentum",
+  "Volatility regime",
+] as const;
+
+export const BONUS_FACTORS = [
+  "Order block",
+  "Fair value gap",
+  "Liquidity sweep",
+  "Order book imbalance",
+] as const;
+
+export type Qualification = {
+  cleared: boolean;
+  momentum: number;
+  aligned: number;
+  conflicts: string[];
+  missing: string[];
+  checks: { label: string; state: "aligned" | "neutral" | "against"; detail: string }[];
+};
+
+/**
+ * Hard gate applied after analysis: every required factor must agree (or at
+ * worst stay neutral), nothing may point the other way, and order-flow
+ * momentum must be strong before a trade is published.
+ */
+export function qualify(
+  a: Analysis,
+  opts: { minMomentum?: number; maxConflicts?: number; minAligned?: number } = {},
+): Qualification {
+  const bias = a.signal.bias;
+  const byLabel = new Map(a.signal.confluence.map((c) => [c.label, c]));
+  const checks = [...REQUIRED_FACTORS, ...BONUS_FACTORS].map((label) => {
+    const c = byLabel.get(label);
+    const state: "aligned" | "neutral" | "against" = !c
+      ? "neutral"
+      : c.bias === bias
+        ? "aligned"
+        : c.bias === "neutral"
+          ? "neutral"
+          : "against";
+    return { label, state, detail: c?.detail ?? "not present" };
+  });
+  const conflicts = checks.filter((c) => c.state === "against").map((c) => c.label);
+  const missing = checks
+    .filter((c) => REQUIRED_FACTORS.includes(c.label as (typeof REQUIRED_FACTORS)[number]) && c.state !== "aligned")
+    .map((c) => c.label);
+  const aligned = checks.filter((c) => c.state === "aligned").length;
+  const minMomentum = opts.minMomentum ?? 55;
+  const maxConflicts = opts.maxConflicts ?? 1;
+  const minAligned = opts.minAligned ?? 7;
+  return {
+    cleared:
+      bias !== "neutral" &&
+      conflicts.length <= maxConflicts &&
+      aligned >= minAligned &&
+      a.momentum >= minMomentum,
+    momentum: a.momentum,
+    aligned,
+    conflicts,
+    missing,
+    checks,
+  };
+}
+
