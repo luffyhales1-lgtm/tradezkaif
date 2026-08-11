@@ -185,7 +185,29 @@ export function liquidityZones(candles: Candle[]): Zone[] {
     .slice(0, 8);
 }
 
+/** Fair value gaps (3-candle imbalance) still unfilled by price. */
+export function fairValueGaps(candles: Candle[], lookback = 120): Zone[] {
+  const out: Zone[] = [];
+  const start = Math.max(2, candles.length - lookback);
+  for (let i = start; i < candles.length; i++) {
+    const a = candles[i - 2];
+    const c = candles[i];
+    if (c.l > a.h) {
+      out.push({ kind: "ob-bull", low: a.h, high: c.l, strength: 60, label: "Bullish FVG" });
+    } else if (c.h < a.l) {
+      out.push({ kind: "ob-bear", low: c.h, high: a.l, strength: 60, label: "Bearish FVG" });
+    }
+  }
+  const price = candles.at(-1)?.c ?? 0;
+  // Keep only gaps price has not traded back through.
+  return out
+    .filter((z) => price < z.low || price > z.high)
+    .sort((x, y) => Math.abs((x.low + x.high) / 2 - price) - Math.abs((y.low + y.high) / 2 - price))
+    .slice(0, 6);
+}
+
 export function fibLevels(candles: Candle[]) {
+
   const window = candles.slice(-120);
   if (!window.length) return null;
   const hi = Math.max(...window.map((c) => c.h));
