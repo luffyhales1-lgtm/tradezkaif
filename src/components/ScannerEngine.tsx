@@ -468,6 +468,8 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
               ["structureStrength", "Structure strength", 10, 80, 1, "%"],
               ["maxAtrPct", "Max volatility", 1, 10, 0.5, "% ATR"],
               ["minRiskReward", "Minimum R:R", 1, 3, 0.05, "R"],
+              ["minMomentum", "Min momentum", 20, 95, 1, "/100"],
+
             ] as const).map(([key, label, min, max, step, suffix]) => (
               <label key={key} className="text-xs text-muted-foreground">
                 <span className="flex justify-between"><span>{label}</span><span className="num text-foreground">{settings[key]}{suffix}</span></span>
