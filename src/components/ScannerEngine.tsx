@@ -105,12 +105,15 @@ export const etaLabel = (min: number) =>
   min < 60 ? `${min}m` : min < 1440 ? `${Math.round(min / 6) / 10}h` : `${(min / 1440).toFixed(1)}d`;
 
 export type ScanResult = Signal & {
-  quant?: { hawkes: number; kelly: number; band: string; bayes: number };
+  quant?: { hawkes: number; kelly: number; band: string; bayes: number; rmt: number };
   htf?: { interval: Interval; bias: Signal["bias"]; agrees: boolean };
   etaMin?: number;
   completeBy?: number;
   grade?: "A+" | "A" | "B";
+  momentum?: number;
+  qualification?: Qualification;
 };
+
 
 type PaperPosition = {
   id: string;
