@@ -482,6 +482,17 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">High frequency</span>
           <button
+            onClick={() => setStrict(!strict)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              strict ? "border-bull/60 bg-bull/15 text-bull" : "border-border text-muted-foreground",
+            )}
+            title="Only publish setups where every required factor agrees and momentum is high"
+          >
+            Full-confluence gate {strict ? "on" : "off"}
+          </button>
+
+          <button
             onClick={() => setTurbo(!turbo)}
             className={cn(
               "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
