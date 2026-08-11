@@ -289,11 +289,18 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
 
       setScannedCount(scored.length);
 
-      // Pass 2 — higher-timeframe confirmation on the shortlist only.
+      // Pass 2 — shortlist must already clear every required factor, then get
+      // higher-timeframe confirmation.
       const shortlist = scored
-        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability - 8)
+        .filter(
+          (s) =>
+            s.bias !== "neutral" &&
+            s.probability >= config.minProbability - 8 &&
+            (!strict || s.qualification?.cleared),
+        )
         .sort((a, b) => b.probability - a.probability)
         .slice(0, Math.max(config.results * 3, 12));
+
 
       const htf = htfOf(interval);
       const confirmed = await mapLimit(shortlist, 8, async (s) => {
