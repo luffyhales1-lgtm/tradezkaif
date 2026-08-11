@@ -746,6 +746,13 @@ export function SignalCard({
           Open {paperAmount?.toFixed(0)} USDT paper trade
         </button>
       )}
+      <button
+        onClick={() => exportScanPdf([signal], signal.createdAt, `${signal.symbol} setup`, signal.symbol)}
+        className="mt-2 w-full rounded-lg border border-bull/50 bg-bull/10 py-1.5 text-xs font-semibold text-bull"
+      >
+        Download PDF
+      </button>
+
     </article>
   );
 }
