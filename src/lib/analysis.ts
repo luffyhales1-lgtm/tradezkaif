@@ -424,6 +424,19 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     });
   }
 
+  const fvgs = fairValueGaps(candles);
+  const fvg = fvgs[0];
+  if (fvg) {
+    conf.push({
+      label: "Fair value gap",
+      weight: 12,
+      bias: fvg.kind === "ob-bull" ? "long" : "short",
+      detail: `${fvg.label} ${fvg.low.toFixed(4)}–${fvg.high.toFixed(4)}`,
+    });
+  }
+
+
+
   const ba = bookAnalysis(book ?? null);
   if (ba) {
     conf.push({
