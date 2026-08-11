@@ -4,6 +4,8 @@ import { Highlighted, Panel, Pill, Stat } from "@/components/ui-bits";
 import { useBook, useLocalState, useMarkPrice, useNow, useSymbolState } from "@/hooks/useMarket";
 import { CONFIRM_MS, HIGH_RISK, useCountdown, useSpoofRadar } from "@/hooks/useSpoof";
 import { fmtPrice, fmtUsd } from "@/lib/binance";
+import { downloadReportPdf } from "@/lib/pdf";
+
 import { cn } from "@/lib/utils";
 
 
