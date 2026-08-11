@@ -639,6 +639,8 @@ export function SignalCard({
   paperAmount?: number;
 }) {
   const long = signal.bias === "long";
+  const [showScreener, setShowScreener] = useState(true);
+
   return (
     <article className="panel p-4">
       <header className="flex items-start justify-between">
