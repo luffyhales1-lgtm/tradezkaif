@@ -106,7 +106,7 @@ function Spoofing() {
                           c.side,
                           fmtPrice(c.price),
                           fmtUsd(c.peakUsd),
-                          c.spoof ? "SPOOF (pulled)" : "REAL (filled/held)",
+                          c.status === "spoof" ? "SPOOF (pulled)" : c.status === "real" ? "REAL (held)" : c.status,
                           `${c.risk}/100`,
                         ]),
                       },
