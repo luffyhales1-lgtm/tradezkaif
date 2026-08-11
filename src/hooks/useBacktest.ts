@@ -11,7 +11,10 @@ export function useBacktest(autoStart = true) {
   const [state, setState] = useState<BacktestState>(() => getBacktestState());
   useEffect(() => {
     if (autoStart) startBacktestEngine();
-    return subscribeBacktest(setState);
+    const unsubscribe = subscribeBacktest(setState);
+    return () => {
+      unsubscribe();
+    };
   }, [autoStart]);
   return state;
 }
