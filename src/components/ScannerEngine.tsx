@@ -244,36 +244,48 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
           maxAtrPct: settings.maxAtrPct / 100,
         });
         const sig = a.signal;
-        let quant: ScanResult["quant"];
-        if (config.useQuant) {
-          const rets = candles.slice(-120).map((c, i, arr) => (i ? (c.c - arr[i - 1].c) / arr[i - 1].c : 0));
-          const events = candles.slice(-40).filter((c) => c.v > 0).map((c) => c.t);
-          const hawkes = hawkesIntensity(events, Date.now());
-          const fwd = forwardReturns(candles, 12);
-          const band = conformalBand(0, fwd, 0.1);
-          const post = bayes(
-            Math.min(0.95, sig.probability / 100),
-            0.5,
-            Math.max(0.05, 1 - sig.probability / 100),
-          );
-          quant = {
-            hawkes,
-            kelly: fractionalKelly(post, sig.rr),
-            band: `±${(band.q * 100).toFixed(2)}%`,
-            bayes: post,
-          };
-          const tail = Math.abs(quantile(rets, 0.05));
-          sig.probability = Math.round(
-            Math.min(99, sig.probability * 0.6 + post * 40 + (tail < 0.02 ? 6 : 0)),
-          );
-        }
+        // Quant pack now runs on every scanner, not just Ultimate.
+        const rets = candles.slice(-120).map((c, i, arr) => (i ? (c.c - arr[i - 1].c) / arr[i - 1].c : 0));
+        const events = candles.slice(-40).filter((c) => c.v > 0).map((c) => c.t);
+        const hawkes = hawkesIntensity(events, Date.now());
+        const fwd = forwardReturns(candles, 12);
+        const band = conformalBand(0, fwd, 0.1);
+        const post = bayes(
+          Math.min(0.95, sig.probability / 100),
+          0.5,
+          Math.max(0.05, 1 - sig.probability / 100),
+        );
+        // Marchenko–Pastur signal/noise on close, delta and volume streams.
+        const rmt = rmtSignalRatio([
+          rets,
+          a.delta.slice(-120).map((d) => d.ratio),
+          candles.slice(-120).map((c) => c.v),
+        ]);
+        const quant: ScanResult["quant"] = {
+          hawkes,
+          kelly: fractionalKelly(post, sig.rr),
+          band: `±${(band.q * 100).toFixed(2)}%`,
+          bayes: post,
+          rmt,
+        };
+        const tail = Math.abs(quantile(rets, 0.05));
+        sig.probability = Math.round(
+          Math.min(
+            99,
+            sig.probability * 0.58 + post * 40 + (tail < 0.02 ? 6 : 0) + Math.min(8, rmt * 24),
+          ),
+        );
+        const qualification = qualify(a, { minMomentum: settings.minMomentum });
         const etaMin = targetEta(candles, interval, sig.entry, sig.targets[0] ?? sig.entry);
         return {
           ...sig,
           quant,
+          qualification,
+          momentum: a.momentum,
           ...(etaMin ? { etaMin, completeBy: Date.now() + etaMin * 60_000 } : {}),
         } as ScanResult;
       });
+
 
       setScannedCount(scored.length);
 
