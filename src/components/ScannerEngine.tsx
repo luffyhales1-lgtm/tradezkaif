@@ -650,6 +650,11 @@ export function SignalCard({
             <Pill tone={long ? "bull" : "bear"}>{signal.bias}</Pill>
             <Pill tone="primary">{signal.probability}% confluence</Pill>
             <Pill>{signal.interval}</Pill>
+            {signal.momentum !== undefined && (
+              <Pill tone={signal.momentum >= 70 ? "bull" : "warn"}>momentum {signal.momentum}/100</Pill>
+            )}
+            {signal.qualification?.cleared && <Pill tone="bull">all factors cleared</Pill>}
+
             {signal.grade && <Pill tone={signal.grade === "B" ? "warn" : "bull"}>{signal.grade} grade</Pill>}
             {signal.htf && (
               <Pill tone={signal.htf.agrees ? "bull" : "warn"}>
