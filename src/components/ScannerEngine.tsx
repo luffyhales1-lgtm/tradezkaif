@@ -141,7 +141,9 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [scannedCount, setScannedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [turbo, setTurbo] = useState(false);
+  const [strict, setStrict] = useState(true);
   const [auto, setAuto] = useState(false);
+
   const [autoEvery, setAutoEvery] = useState(60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<ScannerSettings>(() => {
