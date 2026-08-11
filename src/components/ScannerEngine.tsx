@@ -597,7 +597,14 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
               >
                 Export JSON
               </button>
+              <button
+                onClick={() => exportScanPdf(results, scannedAt, config.title, config.key)}
+                className="rounded-lg border border-bull/50 bg-bull/10 px-3 py-1.5 text-xs font-semibold text-bull"
+              >
+                Download PDF
+              </button>
             </div>
+
           }
         >
           <p className="text-xs text-muted-foreground">
