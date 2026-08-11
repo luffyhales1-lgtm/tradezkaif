@@ -369,7 +369,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setRunning(false);
       setLeft(config.durationMs / 1000);
     }
-  }, [config, interval, running, settings, turbo]);
+  }, [config, interval, running, settings, turbo, strict]);
 
   const openPaper = useCallback((signal: ScanResult) => {
     if (signal.bias === "neutral" || !signal.targets[0] || paperAmount <= 0) return;
