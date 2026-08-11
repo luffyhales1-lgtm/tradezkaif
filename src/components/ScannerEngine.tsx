@@ -686,13 +686,37 @@ export function SignalCard({
       </div>
 
       {signal.quant && (
-        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
           <Stat label="Hawkes λ(t)" value={signal.quant.hawkes.toFixed(3)} />
           <Stat label="Bayes P(H|E)" value={`${(signal.quant.bayes * 100).toFixed(1)}%`} />
           <Stat label="Frac. Kelly f*" value={`${(signal.quant.kelly * 100).toFixed(2)}%`} />
           <Stat label="Conformal band" value={signal.quant.band} />
+          <Stat label="RMT signal" value={`${(signal.quant.rmt * 100).toFixed(1)}%`} />
         </div>
       )}
+
+      <div className="mt-3 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Live screener</span>
+        <button
+          onClick={() => setShowScreener((open) => !open)}
+          className="rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-secondary"
+        >
+          {showScreener ? "Hide" : "Show"}
+        </button>
+      </div>
+      {showScreener && signal.bias !== "neutral" && (
+        <SignalScreener
+          symbol={signal.symbol}
+          interval={signal.interval as Interval}
+          bias={signal.bias}
+          entry={signal.entry}
+          stop={signal.stop}
+          targets={signal.targets}
+          fmt={fmt}
+        />
+      )}
+
+
 
       <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
         {signal.confluence.map((c) => (
