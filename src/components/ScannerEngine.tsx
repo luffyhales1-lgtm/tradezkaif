@@ -336,9 +336,17 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       if (abort.current) return;
 
       const top = confirmed
-        .filter((s) => s.probability >= settings.minProbability && s.rr >= settings.minRiskReward && s.htf?.agrees !== false)
-        .sort((a, b) => b.probability - a.probability)
+        .filter(
+          (s) =>
+            s.probability >= settings.minProbability &&
+            s.rr >= settings.minRiskReward &&
+            s.htf?.agrees !== false &&
+            (s.momentum ?? 0) >= settings.minMomentum &&
+            (!strict || s.qualification?.cleared),
+        )
+        .sort((a, b) => (b.momentum ?? 0) + b.probability * 1.4 - ((a.momentum ?? 0) + a.probability * 1.4))
         .slice(0, config.results);
+
 
       setResults(top);
       setScannedAt(Date.now());
