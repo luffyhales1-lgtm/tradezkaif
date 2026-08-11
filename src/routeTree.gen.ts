@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as BacktestRouteImport } from './routes/backtest'
 import { Route as FibRouteImport } from './routes/fib'
 import { Route as FootprintRouteImport } from './routes/footprint'
 import { Route as ForexRouteImport } from './routes/forex'
@@ -35,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BacktestRoute = BacktestRouteImport.update({
+  id: '/backtest',
+  path: '/backtest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FibRoute = FibRouteImport.update({
@@ -116,6 +122,7 @@ const WhaleRoute = WhaleRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/backtest': typeof BacktestRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
   '/forex': typeof ForexRoute
@@ -135,6 +142,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/backtest': typeof BacktestRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
   '/forex': typeof ForexRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/backtest': typeof BacktestRoute
   '/fib': typeof FibRoute
   '/footprint': typeof FootprintRoute
   '/forex': typeof ForexRoute
@@ -176,6 +185,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/backtest'
     | '/fib'
     | '/footprint'
     | '/forex'
@@ -195,6 +205,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/backtest'
     | '/fib'
     | '/footprint'
     | '/forex'
@@ -214,6 +225,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/backtest'
     | '/fib'
     | '/footprint'
     | '/forex'
@@ -234,6 +246,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  BacktestRoute: typeof BacktestRoute
   FibRoute: typeof FibRoute
   FootprintRoute: typeof FootprintRoute
   ForexRoute: typeof ForexRoute
@@ -265,6 +278,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/backtest': {
+      id: '/backtest'
+      path: '/backtest'
+      fullPath: '/backtest'
+      preLoaderRoute: typeof BacktestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/fib': {
@@ -378,6 +398,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  BacktestRoute: BacktestRoute,
   FibRoute: FibRoute,
   FootprintRoute: FootprintRoute,
   ForexRoute: ForexRoute,

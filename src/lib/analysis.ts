@@ -185,7 +185,29 @@ export function liquidityZones(candles: Candle[]): Zone[] {
     .slice(0, 8);
 }
 
+/** Fair value gaps (3-candle imbalance) still unfilled by price. */
+export function fairValueGaps(candles: Candle[], lookback = 120): Zone[] {
+  const out: Zone[] = [];
+  const start = Math.max(2, candles.length - lookback);
+  for (let i = start; i < candles.length; i++) {
+    const a = candles[i - 2];
+    const c = candles[i];
+    if (c.l > a.h) {
+      out.push({ kind: "ob-bull", low: a.h, high: c.l, strength: 60, label: "Bullish FVG" });
+    } else if (c.h < a.l) {
+      out.push({ kind: "ob-bear", low: c.h, high: a.l, strength: 60, label: "Bearish FVG" });
+    }
+  }
+  const price = candles.at(-1)?.c ?? 0;
+  // Keep only gaps price has not traded back through.
+  return out
+    .filter((z) => price < z.low || price > z.high)
+    .sort((x, y) => Math.abs((x.low + x.high) / 2 - price) - Math.abs((y.low + y.high) / 2 - price))
+    .slice(0, 6);
+}
+
 export function fibLevels(candles: Candle[]) {
+
   const window = candles.slice(-120);
   if (!window.length) return null;
   const hi = Math.max(...window.map((c) => c.h));
@@ -402,6 +424,19 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     });
   }
 
+  const fvgs = fairValueGaps(candles);
+  const fvg = fvgs[0];
+  if (fvg) {
+    conf.push({
+      label: "Fair value gap",
+      weight: 12,
+      bias: fvg.kind === "ob-bull" ? "long" : "short",
+      detail: `${fvg.label} ${fvg.low.toFixed(4)}–${fvg.high.toFixed(4)}`,
+    });
+  }
+
+
+
   const ba = bookAnalysis(book ?? null);
   if (ba) {
     conf.push({
@@ -467,6 +502,22 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     horizon: interval,
   };
 
+  // Momentum grade: taker aggression + volume expansion + resting book pressure.
+  const volRatio = volNow / volAvg;
+  const directional = bias === "short" ? -1 : 1;
+  const momentum = Math.round(
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.abs(deltaRatio) * 160 * (Math.sign(deltaRatio) === directional ? 1 : -0.5) +
+          Math.min(45, (volRatio - 1) * 55) +
+          (ba ? ba.imbalance * directional * 60 : 0) +
+          22,
+      ),
+    ),
+  );
+
   return {
     signal,
     price,
@@ -476,12 +527,88 @@ export function analyze(symbol: string, candles: Candle[], interval: string, boo
     bb: { upper: bb.upper.at(-1)!, lower: bb.lower.at(-1)!, mid: bb.mid.at(-1)! },
     delta: d,
     deltaRatio,
+    volRatio,
+    momentum,
     sr,
     obs,
     liq,
+    fvgs,
     fib: fibLevels(candles),
     book: ba,
   };
 }
 
 export type Analysis = ReturnType<typeof analyze>;
+
+/** Factors a setup must not contradict before the scanner publishes it. */
+export const REQUIRED_FACTORS = [
+  "Trendline & swing structure",
+  "EMA trend (21/50/200)",
+  "RSI(14)",
+  "Bollinger position",
+  "Footprint delta (12 candles)",
+  "Structure zone",
+  "Volume momentum",
+  "Volatility regime",
+] as const;
+
+export const BONUS_FACTORS = [
+  "Order block",
+  "Fair value gap",
+  "Liquidity sweep",
+  "Order book imbalance",
+] as const;
+
+export type Qualification = {
+  cleared: boolean;
+  momentum: number;
+  aligned: number;
+  conflicts: string[];
+  missing: string[];
+  checks: { label: string; state: "aligned" | "neutral" | "against"; detail: string }[];
+};
+
+/**
+ * Hard gate applied after analysis: every required factor must agree (or at
+ * worst stay neutral), nothing may point the other way, and order-flow
+ * momentum must be strong before a trade is published.
+ */
+export function qualify(
+  a: Analysis,
+  opts: { minMomentum?: number; maxConflicts?: number; minAligned?: number } = {},
+): Qualification {
+  const bias = a.signal.bias;
+  const byLabel = new Map(a.signal.confluence.map((c) => [c.label, c]));
+  const checks = [...REQUIRED_FACTORS, ...BONUS_FACTORS].map((label) => {
+    const c = byLabel.get(label);
+    const state: "aligned" | "neutral" | "against" = !c
+      ? "neutral"
+      : c.bias === bias
+        ? "aligned"
+        : c.bias === "neutral"
+          ? "neutral"
+          : "against";
+    return { label, state, detail: c?.detail ?? "not present" };
+  });
+  const conflicts = checks.filter((c) => c.state === "against").map((c) => c.label);
+  const missing = checks
+    .filter((c) => REQUIRED_FACTORS.includes(c.label as (typeof REQUIRED_FACTORS)[number]) && c.state !== "aligned")
+    .map((c) => c.label);
+  const aligned = checks.filter((c) => c.state === "aligned").length;
+  const minMomentum = opts.minMomentum ?? 55;
+  const maxConflicts = opts.maxConflicts ?? 1;
+  const minAligned = opts.minAligned ?? 7;
+  return {
+    cleared:
+      bias !== "neutral" &&
+      conflicts.length <= maxConflicts &&
+      aligned >= minAligned &&
+      a.momentum >= minMomentum,
+    momentum: a.momentum,
+    aligned,
+    conflicts,
+    missing,
+    checks,
+  };
+}
+

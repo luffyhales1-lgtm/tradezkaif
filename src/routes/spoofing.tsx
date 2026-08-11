@@ -4,6 +4,8 @@ import { Highlighted, Panel, Pill, Stat } from "@/components/ui-bits";
 import { useBook, useLocalState, useMarkPrice, useNow, useSymbolState } from "@/hooks/useMarket";
 import { CONFIRM_MS, HIGH_RISK, useCountdown, useSpoofRadar } from "@/hooks/useSpoof";
 import { fmtPrice, fmtUsd } from "@/lib/binance";
+import { downloadReportPdf } from "@/lib/pdf";
+
 import { cn } from "@/lib/utils";
 
 
@@ -77,7 +79,50 @@ function Spoofing() {
         <Panel
           title="Radar · tracking"
           subtitle={`Each wall needs 30s before it is judged · flagged above ${riskThreshold}/100`}
+          right={
+            <button
+              onClick={() =>
+                downloadReportPdf({
+                  title: `Spoof Radar · ${symbol}`,
+                  subtitle: `${tracking.length} walls tracked · ${confirmed.length} confirmed · spoof ratio ${spoofPct}% · threshold ${riskThreshold}/100`,
+                  fileName: `cotraders-spoof-${symbol}-${Date.now()}.pdf`,
+                  sections: [
+                    {
+                      heading: "Tracking",
+                      table: {
+                        headers: ["Side", "Price", "Size", "Peak", "Risk"],
+                        rows: tracking.map((t) => [
+                          t.side,
+                          fmtPrice(t.price),
+                          fmtUsd(t.usd),
+                          fmtUsd(t.peakUsd),
+                          `${t.risk}/100`,
+                        ]),
+                      },
+                    },
+                    {
+                      heading: "Confirmed events",
+                      table: {
+                        headers: ["Side", "Price", "Peak", "Verdict", "Risk"],
+                        rows: confirmed.map((c) => [
+                          c.side,
+                          fmtPrice(c.price),
+                          fmtUsd(c.peakUsd),
+                          c.status === "spoof" ? "SPOOF (pulled)" : c.status === "real" ? "REAL (held)" : c.status,
+                          `${c.risk}/100`,
+                        ]),
+                      },
+                    },
+                  ],
+                })
+              }
+              className="rounded-lg border border-bull/50 bg-bull/10 px-3 py-1.5 text-xs font-semibold text-bull"
+            >
+              Download PDF
+            </button>
+          }
         >
+
           <div className="max-h-[460px] space-y-1.5 overflow-auto scroll-lock">
             {tracking.map((t) => {
               const age = Math.min(CONFIRM_MS, now - t.firstSeen);

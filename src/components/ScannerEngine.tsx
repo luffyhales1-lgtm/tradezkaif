@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchKlines, fetchTopSymbols, fmtPrice, type Candle, type Interval } from "@/lib/binance";
-import { analyze, type Signal } from "@/lib/analysis";
+import { analyze, qualify, type Qualification, type Signal } from "@/lib/analysis";
 import {
   conformalBand,
   forwardReturns,
@@ -8,16 +8,20 @@ import {
   hawkesIntensity,
   quantile,
   bayes,
+  rmtSignalRatio,
 } from "@/lib/quant";
 import { pushLog } from "@/lib/bus";
 import { Panel, Pill, Stat } from "@/components/ui-bits";
 import { INTERVALS } from "@/lib/binance";
+import { SignalScreener } from "@/components/SignalScreener";
+import { downloadReportPdf } from "@/lib/pdf";
 import { cn } from "@/lib/utils";
 import {
   defaultScannerSettings,
   SCANNER_PRESETS,
   type ScannerSettings,
 } from "@/lib/scanner-settings";
+
 
 /** Pluggable market source so the same engine can scan crypto or forex. */
 export type ScanSource = {
@@ -101,12 +105,15 @@ export const etaLabel = (min: number) =>
   min < 60 ? `${min}m` : min < 1440 ? `${Math.round(min / 6) / 10}h` : `${(min / 1440).toFixed(1)}d`;
 
 export type ScanResult = Signal & {
-  quant?: { hawkes: number; kelly: number; band: string; bayes: number };
+  quant?: { hawkes: number; kelly: number; band: string; bayes: number; rmt: number };
   htf?: { interval: Interval; bias: Signal["bias"]; agrees: boolean };
   etaMin?: number;
   completeBy?: number;
   grade?: "A+" | "A" | "B";
+  momentum?: number;
+  qualification?: Qualification;
 };
+
 
 type PaperPosition = {
   id: string;
@@ -134,7 +141,9 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
   const [scannedCount, setScannedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [turbo, setTurbo] = useState(false);
+  const [strict, setStrict] = useState(true);
   const [auto, setAuto] = useState(false);
+
   const [autoEvery, setAutoEvery] = useState(60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<ScannerSettings>(() => {
@@ -237,44 +246,63 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
           maxAtrPct: settings.maxAtrPct / 100,
         });
         const sig = a.signal;
-        let quant: ScanResult["quant"];
-        if (config.useQuant) {
-          const rets = candles.slice(-120).map((c, i, arr) => (i ? (c.c - arr[i - 1].c) / arr[i - 1].c : 0));
-          const events = candles.slice(-40).filter((c) => c.v > 0).map((c) => c.t);
-          const hawkes = hawkesIntensity(events, Date.now());
-          const fwd = forwardReturns(candles, 12);
-          const band = conformalBand(0, fwd, 0.1);
-          const post = bayes(
-            Math.min(0.95, sig.probability / 100),
-            0.5,
-            Math.max(0.05, 1 - sig.probability / 100),
-          );
-          quant = {
-            hawkes,
-            kelly: fractionalKelly(post, sig.rr),
-            band: `±${(band.q * 100).toFixed(2)}%`,
-            bayes: post,
-          };
-          const tail = Math.abs(quantile(rets, 0.05));
-          sig.probability = Math.round(
-            Math.min(99, sig.probability * 0.6 + post * 40 + (tail < 0.02 ? 6 : 0)),
-          );
-        }
+        // Quant pack now runs on every scanner, not just Ultimate.
+        const rets = candles.slice(-120).map((c, i, arr) => (i ? (c.c - arr[i - 1].c) / arr[i - 1].c : 0));
+        const events = candles.slice(-40).filter((c) => c.v > 0).map((c) => c.t);
+        const hawkes = hawkesIntensity(events, Date.now());
+        const fwd = forwardReturns(candles, 12);
+        const band = conformalBand(0, fwd, 0.1);
+        const post = bayes(
+          Math.min(0.95, sig.probability / 100),
+          0.5,
+          Math.max(0.05, 1 - sig.probability / 100),
+        );
+        // Marchenko–Pastur signal/noise on close, delta and volume streams.
+        const rmt = rmtSignalRatio([
+          rets,
+          a.delta.slice(-120).map((d) => d.ratio),
+          candles.slice(-120).map((c) => c.v),
+        ]);
+        const quant: ScanResult["quant"] = {
+          hawkes,
+          kelly: fractionalKelly(post, sig.rr),
+          band: `±${(band.q * 100).toFixed(2)}%`,
+          bayes: post,
+          rmt,
+        };
+        const tail = Math.abs(quantile(rets, 0.05));
+        sig.probability = Math.round(
+          Math.min(
+            99,
+            sig.probability * 0.58 + post * 40 + (tail < 0.02 ? 6 : 0) + Math.min(8, rmt * 24),
+          ),
+        );
+        const qualification = qualify(a, { minMomentum: settings.minMomentum });
         const etaMin = targetEta(candles, interval, sig.entry, sig.targets[0] ?? sig.entry);
         return {
           ...sig,
           quant,
+          qualification,
+          momentum: a.momentum,
           ...(etaMin ? { etaMin, completeBy: Date.now() + etaMin * 60_000 } : {}),
         } as ScanResult;
       });
 
+
       setScannedCount(scored.length);
 
-      // Pass 2 — higher-timeframe confirmation on the shortlist only.
+      // Pass 2 — shortlist must already clear every required factor, then get
+      // higher-timeframe confirmation.
       const shortlist = scored
-        .filter((s) => s.bias !== "neutral" && s.probability >= config.minProbability - 8)
+        .filter(
+          (s) =>
+            s.bias !== "neutral" &&
+            s.probability >= config.minProbability - 8 &&
+            (!strict || s.qualification?.cleared),
+        )
         .sort((a, b) => b.probability - a.probability)
         .slice(0, Math.max(config.results * 3, 12));
+
 
       const htf = htfOf(interval);
       const confirmed = await mapLimit(shortlist, 8, async (s) => {
@@ -310,9 +338,17 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       if (abort.current) return;
 
       const top = confirmed
-        .filter((s) => s.probability >= settings.minProbability && s.rr >= settings.minRiskReward && s.htf?.agrees !== false)
-        .sort((a, b) => b.probability - a.probability)
+        .filter(
+          (s) =>
+            s.probability >= settings.minProbability &&
+            s.rr >= settings.minRiskReward &&
+            s.htf?.agrees !== false &&
+            (s.momentum ?? 0) >= settings.minMomentum &&
+            (!strict || s.qualification?.cleared),
+        )
+        .sort((a, b) => (b.momentum ?? 0) + b.probability * 1.4 - ((a.momentum ?? 0) + a.probability * 1.4))
         .slice(0, config.results);
+
 
       setResults(top);
       setScannedAt(Date.now());
@@ -333,7 +369,7 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
       setRunning(false);
       setLeft(config.durationMs / 1000);
     }
-  }, [config, interval, running, settings, turbo]);
+  }, [config, interval, running, settings, turbo, strict]);
 
   const openPaper = useCallback((signal: ScanResult) => {
     if (signal.bias === "neutral" || !signal.targets[0] || paperAmount <= 0) return;
@@ -432,6 +468,8 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
               ["structureStrength", "Structure strength", 10, 80, 1, "%"],
               ["maxAtrPct", "Max volatility", 1, 10, 0.5, "% ATR"],
               ["minRiskReward", "Minimum R:R", 1, 3, 0.05, "R"],
+              ["minMomentum", "Min momentum", 20, 95, 1, "/100"],
+
             ] as const).map(([key, label, min, max, step, suffix]) => (
               <label key={key} className="text-xs text-muted-foreground">
                 <span className="flex justify-between"><span>{label}</span><span className="num text-foreground">{settings[key]}{suffix}</span></span>
@@ -443,6 +481,17 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">High frequency</span>
+          <button
+            onClick={() => setStrict(!strict)}
+            className={cn(
+              "rounded border px-2 py-1 text-[10px] uppercase tracking-wider",
+              strict ? "border-bull/60 bg-bull/15 text-bull" : "border-border text-muted-foreground",
+            )}
+            title="Only publish setups where every required factor agrees and momentum is high"
+          >
+            Full-confluence gate {strict ? "on" : "off"}
+          </button>
+
           <button
             onClick={() => setTurbo(!turbo)}
             className={cn(
@@ -548,7 +597,14 @@ export function ScannerEngine({ config }: { config: ScannerConfig }) {
               >
                 Export JSON
               </button>
+              <button
+                onClick={() => exportScanPdf(results, scannedAt, config.title, config.key)}
+                className="rounded-lg border border-bull/50 bg-bull/10 px-3 py-1.5 text-xs font-semibold text-bull"
+              >
+                Download PDF
+              </button>
             </div>
+
           }
         >
           <p className="text-xs text-muted-foreground">
@@ -583,6 +639,8 @@ export function SignalCard({
   paperAmount?: number;
 }) {
   const long = signal.bias === "long";
+  const [showScreener, setShowScreener] = useState(true);
+
   return (
     <article className="panel p-4">
       <header className="flex items-start justify-between">
@@ -592,6 +650,11 @@ export function SignalCard({
             <Pill tone={long ? "bull" : "bear"}>{signal.bias}</Pill>
             <Pill tone="primary">{signal.probability}% confluence</Pill>
             <Pill>{signal.interval}</Pill>
+            {signal.momentum !== undefined && (
+              <Pill tone={signal.momentum >= 70 ? "bull" : "warn"}>momentum {signal.momentum}/100</Pill>
+            )}
+            {signal.qualification?.cleared && <Pill tone="bull">all factors cleared</Pill>}
+
             {signal.grade && <Pill tone={signal.grade === "B" ? "warn" : "bull"}>{signal.grade} grade</Pill>}
             {signal.htf && (
               <Pill tone={signal.htf.agrees ? "bull" : "warn"}>
@@ -623,13 +686,37 @@ export function SignalCard({
       </div>
 
       {signal.quant && (
-        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
           <Stat label="Hawkes λ(t)" value={signal.quant.hawkes.toFixed(3)} />
           <Stat label="Bayes P(H|E)" value={`${(signal.quant.bayes * 100).toFixed(1)}%`} />
           <Stat label="Frac. Kelly f*" value={`${(signal.quant.kelly * 100).toFixed(2)}%`} />
           <Stat label="Conformal band" value={signal.quant.band} />
+          <Stat label="RMT signal" value={`${(signal.quant.rmt * 100).toFixed(1)}%`} />
         </div>
       )}
+
+      <div className="mt-3 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Live screener</span>
+        <button
+          onClick={() => setShowScreener((open) => !open)}
+          className="rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-secondary"
+        >
+          {showScreener ? "Hide" : "Show"}
+        </button>
+      </div>
+      {showScreener && signal.bias !== "neutral" && (
+        <SignalScreener
+          symbol={signal.symbol}
+          interval={signal.interval as Interval}
+          bias={signal.bias}
+          entry={signal.entry}
+          stop={signal.stop}
+          targets={signal.targets}
+          fmt={fmt}
+        />
+      )}
+
+
 
       <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
         {signal.confluence.map((c) => (
@@ -659,6 +746,13 @@ export function SignalCard({
           Open {paperAmount?.toFixed(0)} USDT paper trade
         </button>
       )}
+      <button
+        onClick={() => exportScanPdf([signal], signal.createdAt, `${signal.symbol} setup`, signal.symbol)}
+        className="mt-2 w-full rounded-lg border border-bull/50 bg-bull/10 py-1.5 text-xs font-semibold text-bull"
+      >
+        Download PDF
+      </button>
+
     </article>
   );
 }
@@ -739,3 +833,51 @@ export function exportSignalCsv(signal: ScanResult) {
   exportScanCsv([signal], signal.createdAt, `${signal.symbol}-${signal.interval}`);
 }
 
+
+/** Printable scan report: setups, TP/SL zones, quant metrics and factor checks. */
+export function exportScanPdf(
+  signals: ScanResult[],
+  scannedAt: number,
+  title = "Scanner report",
+  key = "scan",
+) {
+  if (!signals.length) return;
+  downloadReportPdf({
+    title,
+    subtitle: `${signals.length} setup(s) · scan completed ${new Date(scannedAt).toLocaleString()}`,
+    fileName: `cotraders-${key}-${scannedAt}.pdf`,
+    sections: [
+      {
+        heading: "Setups",
+        table: {
+          headers: ["Symbol", "Bias", "Prob", "Mom", "Entry", "SL", "TP1", "TP3", "Grade"],
+          rows: signals.map((s) => [
+            s.symbol,
+            s.bias.toUpperCase(),
+            `${s.probability}%`,
+            `${s.momentum ?? "—"}`,
+            fmtPrice(s.entry),
+            fmtPrice(s.stop),
+            s.targets[0] ? fmtPrice(s.targets[0]) : "—",
+            s.targets[2] ? fmtPrice(s.targets[2]) : "—",
+            s.grade ?? "—",
+          ]),
+        },
+      },
+      ...signals.map((s) => ({
+        heading: `${s.symbol} · ${s.bias.toUpperCase()} · ${s.interval}`,
+        lines: [
+          `Entry ${fmtPrice(s.entry)} · SL ${fmtPrice(s.stop)} · TP ${s.targets.map(fmtPrice).join(" / ")}`,
+          s.etaMin ? `TP1 expected in ~${etaLabel(s.etaMin)}` : "",
+          s.quant
+            ? `Quant — Hawkes ${s.quant.hawkes.toFixed(3)} · Bayes ${(s.quant.bayes * 100).toFixed(1)}% · Kelly ${(s.quant.kelly * 100).toFixed(2)}% · band ${s.quant.band} · RMT ${(s.quant.rmt * 100).toFixed(1)}%`
+            : "",
+          s.qualification
+            ? `Factor gate — ${s.qualification.aligned} aligned, conflicts: ${s.qualification.conflicts.join(", ") || "none"}`
+            : "",
+          ...s.confluence.map((c) => `• ${c.label} (${c.bias}): ${c.detail}`),
+        ].filter(Boolean),
+      })),
+    ],
+  });
+}

@@ -6,6 +6,8 @@ import { useBook, useCandles, useLocalState, useMarkPrice, useSymbolState } from
 import { bookAnalysis, liquidityZones, type Zone } from "@/lib/analysis";
 
 import { fmtPrice, fmtUsd } from "@/lib/binance";
+import { downloadReportPdf } from "@/lib/pdf";
+
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/liquidity")({
@@ -113,7 +115,42 @@ function Liquidity() {
               {fmtUsd(v)}
             </button>
           ))}
+          <button
+            onClick={() =>
+              downloadReportPdf({
+                title: `Liquidity map & sweeps · ${symbol}`,
+                subtitle: `Mark ${price ? fmtPrice(price) : "—"} · ${zones.length} zones · ${walls.length} walls ≥ ${fmtUsd(minWall)}`,
+                fileName: `cotraders-liquidity-${symbol}-${Date.now()}.pdf`,
+                sections: [
+                  {
+                    heading: "Liquidity zones",
+                    table: {
+                      headers: ["Type", "Label", "Low", "High", "Strength"],
+                      rows: zones.map((z) => [
+                        z.kind,
+                        z.label,
+                        fmtPrice(z.low),
+                        fmtPrice(z.high),
+                        z.strength.toFixed(0),
+                      ]),
+                    },
+                  },
+                  {
+                    heading: "Whale walls",
+                    table: {
+                      headers: ["Side", "Price", "Size"],
+                      rows: walls.map((w) => [w.side, fmtPrice(w.price), fmtUsd(w.usd)]),
+                    },
+                  },
+                ],
+              })
+            }
+            className="rounded-lg border border-bull/50 bg-bull/10 px-3 py-1.5 text-xs font-semibold text-bull"
+          >
+            Download PDF
+          </button>
         </div>
+
       </div>
 
 
