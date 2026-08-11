@@ -6,6 +6,8 @@ import { useBook, useCandles, useLocalState, useMarkPrice, useSymbolState } from
 import { bookAnalysis, liquidityZones, type Zone } from "@/lib/analysis";
 
 import { fmtPrice, fmtUsd } from "@/lib/binance";
+import { downloadReportPdf } from "@/lib/pdf";
+
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/liquidity")({
